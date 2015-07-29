@@ -21,12 +21,6 @@ from math import log10, pi
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 from matplotlib.patches import PathPatch
-#--------------------------------------------------
-#...Allow for using TeX mode in matplotlib Figures
-#--------------------------------------------------
-from matplotlib import rc
-rc('font',**{'family':'serif','serif':['Palatino']})
-rc('text', usetex=True)
 
 ###################################################
 ##########SUPPORT CLASSES AND FUNCTIONS############
@@ -128,8 +122,6 @@ class Zone:
         self.last_blocks.extend(zone2.last_blocks)
         self.new_blocks.extend(zone2.new_blocks)
 
-
-
 # Create contour levels array (TBD: Need to be improved)
 def get_levels_linear(min,max,n_levels):
     #max = round(max,2)
@@ -153,6 +145,109 @@ def default_extractor(identifier, scale, prof):
         return np.log10(abs(prof.get(identifier))+1e-99)
     else:
         print "Unrecognized scale: " + scale
+                
+#returns a list of matplotlib path objects with the mixing regions
+def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
+        xaxis_divide, radius_tolerance, mass_tolerance, min_x_coord, max_x_coord):
+   # Get mixing zones and mass borders from history.data files
+   mix_data = []
+   histories = []
+   if len(history_names) == 0:
+       history_names = [logs_dir + "/" + "history.data"]
+   for history_name in history_names:
+       print history_name
+       histories.append(ms.history_data(".", slname = history_name, clean_starlog = False))
+   x_coords = []
+   for history in histories:
+       x_coords.extend(history.get(xaxis) / xaxis_divide)
+   y_coords = []
+   if yaxis_normalize:
+       y_coords = [1.0]*len(x_coords)
+   elif yaxis == "radius":
+       for history in histories:
+           y_coords.extend(history.get('photosphere_r'))
+   else:
+       for history in histories:
+           y_coords.extend(history.get('star_mass'))
+
+   mesa_mix_zones = 0
+   while True:
+       try:
+           mesa_mix_zones = mesa_mix_zones + 1
+           mix_type = []
+           mix_top = []
+           for history in histories:
+               mix_type.extend(history.get('mix_type_'+str(mesa_mix_zones)))
+               if yaxis == "radius":
+                    mix_top.extend(history.get('mix_relr_top_'+str(mesa_mix_zones)))
+               else:
+                    mix_top.extend(history.get('mix_qtop_'+str(mesa_mix_zones)))
+           mix_data.append([mix_type, mix_top])
+       except Exception, e:
+           #reached all mix zones included
+           mesa_mix_zones = mesa_mix_zones - 1
+           break
+
+   if yaxis == "radius":
+       tolerance = radius_tolerance
+   else:
+       tolerance = mass_tolerance
+
+   zones = []
+   mix_types = []
+   open_zones = []
+   new_zones = []
+   for i in range(1,len(x_coords)):
+       current_x = x_coords[i]
+       if current_x > max_x_coord:
+           break
+       if current_x < min_x_coord:
+           continue
+       previous_x = x_coords[i-1]
+       for j in range(0,mesa_mix_zones):
+           mix_type = mix_data[j][0][i]
+           if mix_type == 0 or mix_type == -1:
+               continue 
+           max_y_coord = mix_data[j][1][i]*y_coords[i]
+           min_y_coord = 0
+           if j > 0:
+               min_y_coord = mix_data[j-1][1][i]*y_coords[i]
+           #ignore too small regions
+           if max_y_coord - min_y_coord < tolerance*y_coords[i]:
+               continue
+           zone_block = Zone_Block(previous_x, current_x, min_y_coord, max_y_coord)
+           exists = False
+           zones_to_merge = []
+           for z in open_zones:
+               if z.extend(zone_block.vertices[1], zone_block.vertices[1].prev_vertex, mix_type):
+                   exists = True
+                   z.new_blocks.append(zone_block)
+                   zones_to_merge.append(z)
+           #merge zones as needed
+           for k in range(1,len(zones_to_merge)):
+               zones_to_merge[0].merge_zone(zones_to_merge[k])
+               open_zones.remove(zones_to_merge[k])
+           #create zone if it has no predecesor
+           if not exists:
+               z = Zone(zone_block, mix_type)
+               new_zones.append(z)
+       open_zones.extend(new_zones)
+       new_zones = []
+       #separate zones which didn't continue here so we don't need to check them all the time
+       for z in open_zones:
+           z.switch_new_blocks()
+       for z in open_zones:
+           if len(z.last_blocks) == 0:
+               zones.append(z.get_path())
+               mix_types.append(z.mix_type)
+               open_zones.remove(z)
+
+   for z in open_zones:
+       z.switch_new_blocks()
+       zones.append(z.get_path())
+       mix_types.append(z.mix_type)
+
+   return zones, mix_types, x_coords, y_coords, histories
 
 ###################################################
 ########END SUPPORT CLASSES AND FUNCTIONS##########
@@ -278,7 +373,7 @@ def kipp_plot(
        
        #read and interpolate data
        if yaxis == "mass":
-           y_data = prof.get('q') * star_mass
+           y_data = prof.get('mass')
            y_interp = np.array([star_mass * j / (numy-1) for j in range(numy)])
        elif yaxis == "radius":
            y_data = prof.get('radius')
@@ -317,128 +412,34 @@ def kipp_plot(
        #make plot
        plots[identifiers[k]] = axis.contourf(X_data_array, Y_data_array, Z_data_array[k,:,:], \
                cmap=contour_cmaps[k], levels=levels[k], alpha=alphas[k], antialiased = False)
-                
-   # Get mixing zones and mass borders from history.data files
-   mix_data = []
-   histories = []
-   if len(history_names) == 0:
-       history_names = [logs_dir + "/" + "history.data"]
-   for history_name in history_names:
-       print history_name
-       histories.append(ms.history_data(".", slname = history_name, clean_starlog = False))
-   x_coords = []
-   for history in histories:
-       x_coords.extend(history.get(xaxis) / xaxis_divide)
-   y_coords = []
-   if yaxis_normalize:
-       y_coords = [1.0]*len(x_coords)
-   elif yaxis == "radius":
-       for history in histories:
-           y_coords.extend(history.get('photosphere_r'))
-   else:
-       for history in histories:
-           y_coords.extend(history.get('star_mass'))
 
-   mesa_mix_zones = 0
-   while True:
-       try:
-           mesa_mix_zones = mesa_mix_zones + 1
-           mix_type = []
-           mix_top = []
-           for history in histories:
-               mix_type.extend(history.get('mix_type_'+str(mesa_mix_zones)))
-               if yaxis == "radius":
-                    mix_top.extend(history.get('mix_relr_top_'+str(mesa_mix_zones)))
-               else:
-                    mix_top.extend(history.get('mix_qtop_'+str(mesa_mix_zones)))
-           mix_data.append([mix_type, mix_top])
-       except Exception, e:
-           #reached all mix zones included
-           mesa_mix_zones = mesa_mix_zones - 1
-           break
+   zones, mix_types, x_coords, y_coords, histories = get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
+           xaxis_divide, radius_tolerance, mass_tolerance, min_x_coord, max_x_coord)
 
-   print "history.data has " + str(mesa_mix_zones) + " mix zones"
-
-   if yaxis == "radius":
-       tolerance = radius_tolerance
-   else:
-       tolerance = mass_tolerance
-
-   zones = []
-   open_zones = []
-   new_zones = []
-   for i in range(1,len(x_coords)):
-       current_x = x_coords[i]
-       if current_x > max_x_coord:
-           break
-       if current_x < min_x_coord:
-           continue
-       previous_x = x_coords[i-1]
-       for j in range(0,mesa_mix_zones):
-           mix_type = mix_data[j][0][i]
-           if mix_type == 0 or mix_type == -1:
-               continue 
-           max_y_coord = mix_data[j][1][i]*y_coords[i]
-           min_y_coord = 0
-           if j > 0:
-               min_y_coord = mix_data[j-1][1][i]*y_coords[i]
-           #ignore too small regions
-           if max_y_coord - min_y_coord < tolerance*y_coords[i]:
-               continue
-           zone_block = Zone_Block(previous_x, current_x, min_y_coord, max_y_coord)
-           exists = False
-           zones_to_merge = []
-           for z in open_zones:
-               if z.extend(zone_block.vertices[1], zone_block.vertices[1].prev_vertex, mix_type):
-                   exists = True
-                   z.new_blocks.append(zone_block)
-                   zones_to_merge.append(z)
-           #merge zones as needed
-           for k in range(1,len(zones_to_merge)):
-               zones_to_merge[0].merge_zone(zones_to_merge[k])
-               open_zones.remove(zones_to_merge[k])
-           #create zone if it has no predecesor
-           if not exists:
-               z = Zone(zone_block, mix_type)
-               new_zones.append(z)
-       open_zones.extend(new_zones)
-       new_zones = []
-       #separate zones which didn't continue here so we don't need to check them all the time
-       for z in open_zones:
-           z.switch_new_blocks()
-       for z in open_zones:
-           if len(z.last_blocks) == 0:
-               zones.append(z)
-               open_zones.remove(z)
-
-   for z in open_zones:
-       z.switch_new_blocks()
-       zones.append(z)
-
-   for z in zones:
+   for i,zone in enumerate(zones):
        color = ""
        #Convective mixing
-       if z.mix_type == 1 and show_conv:
+       if mix_types[i] == 1 and show_conv:
            color = "Chartreuse"
            hatch = "//"
            line  = 1
        #Overshooting 
-       elif z.mix_type == 3 and show_over:
+       elif mix_types[i] == 3 and show_over:
            color = "purple"
            hatch = "x"
            line  = 1
        #Semiconvective mixing
-       elif z.mix_type == 4 and show_semi:
+       elif mix_types[i] == 4 and show_semi:
            color = "red"
            hatch = "\\\\"
            line  = 1
        #Thermohaline mixing
-       elif z.mix_type == 5 and show_therm:
+       elif mix_types[i] == 5 and show_therm:
            color = "Gold" #Salmon
            hatch = "||"
            line  = 1
        #Rotational mixing
-       elif z.mix_type == 6 and show_rot:
+       elif mix_types[i] == 6 and show_rot:
            color = "brown"
            hatch = "*"
            line  = 1
@@ -447,8 +448,7 @@ def kipp_plot(
            color = "white"
            hatch = " "
            line = 0
-       #axis.add_patch(Polygon(z.get_zone_vertices(),closed=True, fill=False, hatch=hatch, edgecolor=color, linewidth=0))
-       axis.add_patch(PathPatch(z.get_path(), fill=False, hatch = hatch, edgecolor=color, linewidth=line))
+       axis.add_patch(PathPatch(zone, fill=False, hatch = hatch, edgecolor=color, linewidth=line))
 
    #limit x_coords to data of contours and add line at stellar surface
    for i, x_coord in enumerate(x_coords):
