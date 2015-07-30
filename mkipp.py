@@ -352,6 +352,30 @@ def kipp_plot(
    # Extract data from profiles
    max_x_coord = -1
    min_x_coord = 1e99
+   #first read all headers to determine max value on yaxis
+   max_y = 0
+   if yaxis_normalize:
+       max_y = star_mass = star_radius = 1.0
+   else:
+       for i,profile_name in enumerate(profile_names):
+           try:
+               prof = Mesa_Data(profile_name[0]+"/profile"+str(profile_name[1])+".data", only_read_header = True)
+           except Exception as e:
+               print "Couldn't read profile number " + str(profile_name[1]) + " in folder " + profile_name[0]
+           if yaxis == "mass":
+               star_mass = prof.header['star_mass']
+               max_y = max(star_mass,max_y)
+           elif yaxis == "radius":
+               star_radius = prof.header_attr.get('photosphere_r')
+               max_y = max(star_radius,max_y)
+   #array to interpolate data in the yaxis
+   y_interp = np.array([max_y * j / (numy-1) for j in range(numy)])
+   #now read the data
+   for i,profile_name in enumerate(profile_names):
+       try:
+           prof = Mesa_Data(profile_name[0]+"/profile"+str(profile_name[1])+".data")
+       except Exception as e:
+           print "Couldn't read profile number " + str(profile_name[1]) + " in folder " + profile_name[0]
    for i,profile_name in enumerate(profile_names):
        try:
            prof = Mesa_Data(profile_name[0]+"/profile"+str(profile_name[1])+".data")
@@ -364,14 +388,6 @@ def kipp_plot(
        min_x_coord = min(min_x_coord, x_coord)
 
        #fill up positions
-       if yaxis_normalize:
-           max_y = star_mass = star_radius = 1.0
-       elif yaxis == "mass":
-           star_mass = prof.header['star_mass']
-           max_y = star_mass
-       elif yaxis == "radius":
-           star_radius = prof.header_attr.get('photosphere_r')
-           max_y = star_radius
        for j in range(numy):
            X_data_array[j,i] = x_coord
            Y_data_array[j,i] = max_y * j / (numy-1)
@@ -379,10 +395,8 @@ def kipp_plot(
        #read and interpolate data
        if yaxis == "mass":
            y_data = prof.get('mass')
-           y_interp = np.array([star_mass * j / (numy-1) for j in range(numy)])
        elif yaxis == "radius":
            y_data = prof.get('radius')
-           y_interp = np.array([star_radius * j / (numy-1) for j in range(numy)])
        #reverse y_data and z_data for np.interp
        y_data = y_data[::-1]
        for k in range(len(identifiers)):
@@ -463,11 +477,6 @@ def kipp_plot(
 
    return plots, histories, [min_x_coord, max_x_coord]
 
-#Special extractors for default plots
-def nucneu_extractor(identifier, scale, prof):
-    eps_nuc = prof.get('eps_nuc')
-    return np.log10(eps_nuc)
-
 #full_kipp_plot: Uses kipp_plot but adds default decorations and default plotting options.
 #                All options except for "contour_plots", "core_masses", "save_file" and "save_filename"
 #                are fed directly into kipp_plot
@@ -487,14 +496,7 @@ def decorated_kipp_plot(
 
    ######## CONTOURS TO PLOT
    #Strings with contours to plot. Possible choices are
-   #- eps_nuc          : Nuclear energy generation rate
-   #- eps_neu          : Neutrino losses
-   #- eps_nuc-eps_neu  : Duh
-   #- B_field          : Equipartition B field
-   #- conv_vel         : Convective velocity
-   #- D_ST             : Spruit_Taylor diffusion coeff.
-   #- D_DSI            : Dynamical shear instability diffusion coeff.
-   #- D_ES             : Eddington Sweet diffusion coeff.
+   #- eps_nuc          : log10 |eps_nuc-eps_nu|
    contour_plots = [],
    #Strings with core masses to plot. Options are "He", "C" and "O". Only for yaxis=mass
    core_masses = [],
