@@ -1,21 +1,26 @@
 """
 Kippenhahn plotter based on SimpleMesaKippy.py and Kippy.py
 Prehistory: SimpleMesaKippy.py, Author: Alfred Gautschy /23.VIII.2012
+
             Kippy.py, Author: Pablo Marchant /13.V.2013
+
             MKippi.py, Author: Matteo Cantiello /V.2013 (Added LOSSES. Color/Line Style inspired by convplot.pro IDL routine of A.Heger) 
                                                 /VI.2013 (Added RADIUS, TIME and NORMALIZE Options. OMEGA Allows to plot w-contours)   
                                                 /VII.2013 (Tentatively added Rotational diff. coefficients,conv. velocities and Equipartition B-field)
+
+                                                (most of these were removed and replaced with flexible plotting options)
+
             mkipp.py, Author: Pablo Marchant    /II.2014 (full rewrite, code cleanup and now works as a module, not a script)
                                                 /III.2014 (enhancement of mixing regions ploting to deal with holes and merging regions)
                                                 /IV.2015 stopped listing enhancements
-Requirements: mesa.py. Also needs history.data and profiles.data containing 
-              History (star_age,model_number, mixing_regions, mix_relr_regions)
-              Profile (star_mass,photosphere_r,q,radius,eps_nuc,non_nuc_neu,logRho,
-              conv_vel_div_csound,omega,am_log_D_ST,am_log_D_ES,am_log_D_DSI,log_conv_vel,initial_mass,initial_z,version_number)
+
+Requirements: history.data and profiles.data containing 
+              History (star_age,model_number,star_mass,photosphere_r,mixing_regions,mix_relr_regions)
+              Profile (mass,radius,eps_nuc)
 """
 import numpy as np
-import mesa as ms
 from math import log10, pi
+from mesa_data import *
 
 #matplotlib specifics
 import matplotlib.pyplot as plt
@@ -145,6 +150,10 @@ def default_extractor(identifier, scale, prof):
         return np.log10(abs(prof.get(identifier))+1e-99)
     else:
         print "Unrecognized scale: " + scale
+
+###################################################
+########END SUPPORT CLASSES AND FUNCTIONS##########
+###################################################
                 
 #returns a list of matplotlib path objects with the mixing regions
 def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
@@ -156,7 +165,7 @@ def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
        history_names = [logs_dir + "/" + "history.data"]
    for history_name in history_names:
        print history_name
-       histories.append(ms.history_data(".", slname = history_name, clean_starlog = False))
+       histories.append(Mesa_Data(history_name))
    x_coords = []
    for history in histories:
        x_coords.extend(history.get(xaxis) / xaxis_divide)
@@ -248,10 +257,6 @@ def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
        mix_types.append(z.mix_type)
 
    return zones, mix_types, x_coords, y_coords, histories
-
-###################################################
-########END SUPPORT CLASSES AND FUNCTIONS##########
-###################################################
 
 #kipp_plot: Plots a Kippenhahn diagram into the matplotlib axis given. No decoration
 #           done (i.e. axis labeling or colorbars). Returns
@@ -349,10 +354,10 @@ def kipp_plot(
    min_x_coord = 1e99
    for i,profile_name in enumerate(profile_names):
        try:
-           prof=ms.mesa_profile(profile_name[0], profile_name[1], num_type='profile_num')
-       except IOError as e:
-           print "Couldn't open profile number " + str(profile_name[1]) + " in folder " + profile_name[0]
-       x_coord = prof.header_attr.get(xaxis) / xaxis_divide
+           prof = Mesa_Data(profile_name[0]+"/profile"+str(profile_name[1])+".data")
+       except Exception as e:
+           print "Couldn't read profile number " + str(profile_name[1]) + " in folder " + profile_name[0]
+       x_coord = prof.header[xaxis] / xaxis_divide
        if x_coord < max_x_coord:
            print "Profiles are not ordered in X coordinate!!!"
        max_x_coord = max(max_x_coord, x_coord)
@@ -362,7 +367,7 @@ def kipp_plot(
        if yaxis_normalize:
            max_y = star_mass = star_radius = 1.0
        elif yaxis == "mass":
-           star_mass = prof.header_attr.get('star_mass')
+           star_mass = prof.header['star_mass']
            max_y = star_mass
        elif yaxis == "radius":
            star_radius = prof.header_attr.get('photosphere_r')
@@ -461,13 +466,7 @@ def kipp_plot(
 #Special extractors for default plots
 def nucneu_extractor(identifier, scale, prof):
     eps_nuc = prof.get('eps_nuc')
-    eps_neu = prof.get('eps_neu')
-    return np.log10(eps_nuc - eps_neu)
-def Bfield_extractor(identifier, scale, prof):
-    log_conv_vel = prof.get('log_conv_vel')
-    conv_vel  = 10**(log_conv_vel)
-    density   = prof.get('logRho')
-    return ((10**density)**0.5)*((2.0*pi)**0.5)*conv_vel
+    return np.log10(eps_nuc)
 
 #full_kipp_plot: Uses kipp_plot but adds default decorations and default plotting options.
 #                All options except for "contour_plots", "core_masses", "save_file" and "save_filename"
@@ -542,13 +541,6 @@ def decorated_kipp_plot(
     contour_cmaps = []
     settings = { 
             "eps_nuc" : ["eps_nuc", default_extractor, "log", "log", "Blues"],
-            "eps_neu" : ["eps_neu", default_extractor, "log", "log", "Purples"],
-            "eps_nuc-eps_neu" : ["eps_nuc-eps_neu", nucneu_extractor, "log", "log", "Blues"],
-            "Bfield" : ["Bfield", Bfield_extractor, "log", "log", "Purples"],
-            "conv_vel" : ["log_conv_vel", default_extractor, "linear", "log", "Oranges"],
-            "D_ST" : ["am_log_D_ST", default_extractor, "linear", "log", "Greens"],
-            "D_DSI" : ["am_log_D_DSI", default_extractor, "linear", "log", "Oranges"],
-            "D_ES" : ["am_log_D_ES", default_extractor, "linear", "log", "Reds"],
             }
     for contour_plot in contour_plots:
         identifiers.append(settings[contour_plot][0])
@@ -595,14 +587,7 @@ def decorated_kipp_plot(
 
     #add colorbars
     labels = {
-            "eps_nuc" : 'Nuclear Energy generation,  Log (erg/g/s)',
-            "eps_neu" :'Neutrino Losses,  Log (erg/g/s)',
-            "eps_nuc-eps_neu" : '$\epsilon_{nuc}-\epsilon_{\\nu}$,  Log (erg/g/s)',
-            "Bfield" : 'Equipartition B-Field,  Log B (G)',
-            "log_conv_vel" : 'convection velocity Log (cm/sec)',
-            "am_log_D_ST" : 'Spruit-Tayler Dynamo,  Log D (cm$^2$/s)',
-            "am_log_D_DSI" : 'Dynamical Shear,  Log D (cm$^2$/s)',
-            "am_log_D_ES" : 'Eddington-Sweet,  Log D (cm$^2$/s)'
+            "eps_nuc" : '$\epsilon_{nuc}-\epsilon_{\\nu}$,  Log (erg/g/s)',
             }
     for key, plot in plots.iteritems():
         bar = plt.colorbar(plot,pad=0.05)
