@@ -21,6 +21,7 @@ Requirements: history.data and profiles.data containing
 import numpy as np
 from math import log10, pi
 from mesa_data import *
+import re
 
 #matplotlib specifics
 import matplotlib.pyplot as plt
@@ -143,7 +144,9 @@ def get_levels_log(min,max,n_levels):
     levels = range(0,max+1)
     return levels;
 
-def default_extractor(identifier, scale, prof):
+def default_extractor(identifier, scale, prof, return_data_columns = False):
+    if return_data_columns:
+        return [identifier]
     if scale == "linear":
         return prof.get(identifier)
     elif scale == "log":
@@ -159,12 +162,23 @@ def default_extractor(identifier, scale, prof):
 def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
         xaxis_divide, radius_tolerance, mass_tolerance, min_x_coord, max_x_coord):
    # Get mixing zones and mass borders from history.data files
+   print "Reading history data"
    mix_data = []
    histories = []
    if len(history_names) == 0:
        history_names = [logs_dir + "/" + "history.data"]
    for history_name in history_names:
-       print history_name
+       history = Mesa_Data(history_name, read_data = False)
+       columns = []
+       for key in history.columns.keys():
+           search_regex = "log_R|star_mass|model_number|.*core_mass|"
+           if yaxis == "radius":
+               search_regex = search_regex + "mix_relr_top.*"
+           else:
+               search_regex = search_regex + "mix_qtop.*"
+           if re.search(search_regex,key):
+               columns.append(key)
+       history.read_data(columns)
        histories.append(Mesa_Data(history_name))
    x_coords = []
    for history in histories:
@@ -174,11 +188,12 @@ def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
        y_coords = [1.0]*len(x_coords)
    elif yaxis == "radius":
        for history in histories:
-           y_coords.extend(history.get('photosphere_r'))
+           y_coords.extend(np.power(10,history.get('log_R')))
    else:
        for history in histories:
            y_coords.extend(history.get('star_mass'))
 
+   print "Constructing mixing regions"
    mesa_mix_zones = 0
    while True:
        try:
@@ -325,7 +340,7 @@ def kipp_plot(
    #Resolution in yaxis (Standard value: 300. Increase for higher res)
    #Y direction is divided in this amount of points, and data is interpolated
    #in between.
-   numy = 300,
+   numy = 1000,
    # To discard tiny convective regions in mass and/or radius. Value represents
    # fraction of total mass or radius
    mass_tolerance = 0.0000001,
@@ -354,6 +369,7 @@ def kipp_plot(
    min_x_coord = 1e99
    #first read all headers to determine max value on yaxis
    max_y = 0
+   print "Reading profile data"
    if yaxis_normalize:
        max_y = star_mass = star_radius = 1.0
    else:
@@ -363,22 +379,23 @@ def kipp_plot(
            except Exception as e:
                print "Couldn't read profile number " + str(profile_name[1]) + " in folder " + profile_name[0]
            if yaxis == "mass":
-               star_mass = prof.header['star_mass']
-               max_y = max(star_mass,max_y)
+               max_y = max(prof.header['star_mass'],max_y)
            elif yaxis == "radius":
-               star_radius = prof.header_attr.get('photosphere_r')
-               max_y = max(star_radius,max_y)
+               max_y = max(prof.header['photosphere_r'],max_y)
    #array to interpolate data in the yaxis
    y_interp = np.array([max_y * j / (numy-1) for j in range(numy)])
    #now read the data
+   #these are the neccesary columns that will be parsed
+   columns = []
+   if yaxis == "mass":
+       columns.append('mass')
+   elif yaxis == "radius":
+       columns.append('radius')
+   for k in range(len(identifiers)):
+       columns.extend(extractors[k](identifiers[k], scales[k], prof, return_data_columns = True))
    for i,profile_name in enumerate(profile_names):
        try:
-           prof = Mesa_Data(profile_name[0]+"/profile"+str(profile_name[1])+".data")
-       except Exception as e:
-           print "Couldn't read profile number " + str(profile_name[1]) + " in folder " + profile_name[0]
-   for i,profile_name in enumerate(profile_names):
-       try:
-           prof = Mesa_Data(profile_name[0]+"/profile"+str(profile_name[1])+".data")
+           prof = Mesa_Data(profile_name[0]+"/profile"+str(profile_name[1])+".data", read_data = False)
        except Exception as e:
            print "Couldn't read profile number " + str(profile_name[1]) + " in folder " + profile_name[0]
        x_coord = prof.header[xaxis] / xaxis_divide
@@ -391,6 +408,8 @@ def kipp_plot(
        for j in range(numy):
            X_data_array[j,i] = x_coord
            Y_data_array[j,i] = max_y * j / (numy-1)
+
+       prof.read_data(columns)
        
        #read and interpolate data
        if yaxis == "mass":
