@@ -5,7 +5,7 @@ This repository provides two files:
 - mesa_data.py: a simple parser of MESA data files that only parses specific columns to save time
 - mkipp.py: the Kippenhahn plotter
  
-Although lower-level functions are provided that allow plotting directly into a matplotlib axis object, a high level function produces a fully decorated plot. The repository comes with some sample MESA data for a 15 Msun, which if used with the following python script
+Although lower-level functions are provided that allow plotting directly into a matplotlib axis object, a high level function produces a fully decorated plot. The repository comes with some sample MESA data for a 20 Msun star, which if used with the following python script
 
 ```python
 import mkipp
