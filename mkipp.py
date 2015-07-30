@@ -21,117 +21,14 @@ Requirements: history.data and profiles.data containing
 import numpy as np
 from math import log10, pi
 from mesa_data import *
-import re
+from mixing_zones import *
 
 #matplotlib specifics
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
-from matplotlib.patches import PathPatch
-
-###################################################
-##########SUPPORT CLASSES AND FUNCTIONS############
-###################################################
-
-# Class used to store mixing zones
-class Zone_Block:
-    def __init__(self, min_x, max_x, min_y, max_y):
-        #vertices for this block, in the order:
-        #-lower left
-        #-upper left
-        #-upper right
-        #-lower right
-        self.vertices = [
-                Zone_Vertex((min_x,min_y)),
-                Zone_Vertex((min_x,max_y)),
-                Zone_Vertex((max_x,max_y)),
-                Zone_Vertex((max_x,min_y))]
-        for i, vertex in enumerate(self.vertices):
-            vertex.prev_vertex = self.vertices[i-1]
-            vertex.next_vertex = self.vertices[(i+1)%4]
-
-class Zone_Vertex:
-    def __init__(self, coords):
-        self.coords = coords
-        self.prev_vertex = None
-        self.next_vertex = None
-        self.checked = False
-
-class Zone:
-    def __init__(self, block, mix_type):
-        self.old_blocks = []
-        self.last_blocks = []
-        self.new_blocks = [block]
-        self.mix_type = mix_type
-        self.open = True
-
-    def extend(self, upper_vertex, lower_vertex, mix_type):
-        if mix_type != self.mix_type:
-            return False
-        found = False
-        for block in self.last_blocks:
-            old_upper = block.vertices[2]
-            old_lower = old_upper.next_vertex
-            old_max_y = old_upper.coords[1]
-            old_min_y = old_lower.coords[1]
-            new_max_y = upper_vertex.coords[1]
-            new_min_y = lower_vertex.coords[1]
-            if (new_max_y <= old_max_y and new_max_y >= old_min_y) or \
-               (new_min_y <= old_max_y and new_min_y >= old_min_y) or \
-               (new_max_y > old_max_y and new_min_y < old_min_y):
-               #associate vertices
-               old_upper.next_vertex = upper_vertex
-               upper_vertex.prev_vertex = old_upper
-               lower_vertex.next_vertex = old_lower
-               old_lower.prev_vertex = lower_vertex
-               #if upper vertex is contained in an older block, no need to
-               #continue
-               if (new_max_y <= old_max_y and new_max_y >= old_min_y) and \
-                  (new_min_y <= old_max_y and new_min_y >= old_min_y):
-                  return True
-               #otherwise, switch lower vertex
-               lower_vertex = old_upper
-               found = True
-        return found
-
-    def switch_new_blocks(self):
-        self.old_blocks.extend(self.last_blocks)
-        self.last_blocks = self.new_blocks
-        self.new_blocks = []
-
-    def get_path(self):
-        self.old_blocks.extend(self.last_blocks)
-        vertices = []
-        coords = []
-        codes = []
-        for block in self.old_blocks:
-            vertices.extend(block.vertices)
-
-        for starting_vertex in vertices:
-            if starting_vertex.checked:
-                continue
-            starting_vertex.checked = True
-            coords.append(starting_vertex.coords)
-            codes.append(Path.MOVETO)
-            current_vertex = starting_vertex
-            while current_vertex.next_vertex != starting_vertex and not current_vertex.next_vertex.checked:
-                current_vertex = current_vertex.next_vertex
-                current_vertex.checked = True
-                coords.append(current_vertex.coords)
-                codes.append(Path.LINETO)
-            coords.append((0,0))
-            codes.append(Path.CLOSEPOLY)
-
-        return Path(coords, codes)
-
-    def merge_zone(self, zone2):
-        self.old_blocks.extend(zone2.old_blocks)
-        self.last_blocks.extend(zone2.last_blocks)
-        self.new_blocks.extend(zone2.new_blocks)
 
 # Create contour levels array (TBD: Need to be improved)
 def get_levels_linear(min,max,n_levels):
-    #max = round(max,2)
-    #min = round(min,2)
     delta = (max-min)/n_levels
     print min, max, delta, n_levels
     levels = np.arange(min-delta,max+delta,delta)
@@ -140,460 +37,269 @@ def get_levels_linear(min,max,n_levels):
 def get_levels_log(min,max,n_levels):
     max = int(max)+1
     min = int(round(min,2))-1
-    #levels = range(min+2,max+1)
     levels = range(0,max+1)
     return levels;
 
-def default_extractor(identifier, scale, prof, return_data_columns = False):
+def default_extractor(identifier, log10_on_data, prof, return_data_columns = False):
     if return_data_columns:
         return [identifier]
-    if scale == "linear":
-        return prof.get(identifier)
-    elif scale == "log":
+    if log10_on_data:
         return np.log10(abs(prof.get(identifier))+1e-99)
     else:
-        print "Unrecognized scale: " + scale
+        return prof.get(identifier)
 
-###################################################
-########END SUPPORT CLASSES AND FUNCTIONS##########
-###################################################
+#properties of the plotter
+class Kipp_Args:
+    def __init__(self,
+            logs_dirs = ['LOGS'],
+            profile_names = [],
+            history_names = [],
+            identifier = "eps_nuc",
+            extractor = default_extractor,
+            log10_on_data = True,
+            contour_colormap = plt.get_cmap("Blues"),
+            levels = [],
+            log_levels = True,
+            num_levels = 8,
+            xaxis = "model_number",
+            xaxis_divide = 1.0,
+            time_units = "Myr",
+            yaxis = "mass",
+            yaxis_normalize = False,
+            show_conv = True, show_therm = True, show_semi = True, show_over = True, show_rot = False,
+            core_masses = ["He","C","O"],
+            yresolution = 1000,
+            mass_tolerance = 0.0000001,
+            radius_tolerance = 0.0000001,
+            decorate_plot = True,
+            show_plot = False,
+            save_file = True,
+            save_filename = "Kippenhahn.png"):
+        """Initializes properties for a Kippenhahn plot
+
+        Note:
+            All arguments are optional, if not provided defaults are assigned
+
+        Args:
+            logs_dir (List[str]): List of paths to MESA LOGS directories. If profile_names and
+                history_names are not provided, they are automatically generated from logs_dir.
+            profile_names (List[str]): List of paths to MESA profile files.
+            history_names (List[str]): List of paths to MESA history files.
+            identifier (str): String used as identifier of data to plot. If not using any custom
+                extractors this is simply the column name in the profile file that will be extracted.
+                Default uses eps_nuc.
+            extractor : TODO, explain
+            log10_on_data (bool): Determines if log10(abs()) is applied to profile data
+            contour_colormap (matplotlib.cm): matplotlib color map used to plot contours
+            levels (List): List of fixed levels for contour plot (int or float)
+            log_levels (bool): if levels is an empty list then they are auto-generated. This
+                variable specifies if the date is the log of a quantity or not, in order to
+                produce discrete integer levels.
+            num_levels (int): Number of automatically generated levels
+            xaxis (str): variable for the xaxis, either "model_number" or "star_age"
+            xaxis_divide (float): divide xaxis by this value
+            time_units (str): When using xaxis = "star_age" this specifies the unit of time
+                and sets the value of xaxis_divide. Options are "yr", "Myr" and "Gyr"
+            yaxis (str): Quantity plotted in the yaxis. Either "mass" or "radius"
+            yaxis_normalize (bool): If True Normalize yaxis at each point using total mass/total radius
+            show_conv, show_therm, show_semi, show_over, show_rot (bool): Specifies whether or
+                certain mixing regions are displayed.
+            core_masses (List(str)): Strings with core masses to plot. Options are "He", "C" and "O".
+                Only for yaxis=mass
+            yresolution (int): resolution for contour plotting
+            mass_tolerance (float): ignore mixing regions smaller than this in solar masses. Ignored
+                if yaxis="radius"
+            radius_tolerance (float): ignore mixing regions smaller than this in solar radii. Ignored
+                if yaxis="mass"
+            decorate_plot (bool): If True, then axis labels are included.
+            show_plot (bool): If True, pyplot.show() is ran at the end
+            save_file (bool): If True, plot is saved after pyplot.show()
+            save_filename (str): Filename to save plot. Extension determines filetype.
+
+        """
+
+        self.logs_dirs = logs_dirs
+        self.profile_names = profile_names
+        self.history_names = history_names
+        self.identifier = identifier
+        self.extractor = extractor
+        self.log10_on_data = log10_on_data
+        self.contour_colormap = contour_colormap
+        self.levels = levels
+        self.log_levels = log_levels
+        self.num_levels = num_levels
+        self.xaxis = xaxis
+        self.xaxis_divide = xaxis_divide
+        self.time_units = time_units
+        self.yaxis = yaxis
+        self.yaxis_normalize = yaxis_normalize
+        self.show_conv = show_conv
+        self.show_therm = show_therm
+        self.show_semi = show_semi
+        self.show_over = show_over
+        self.show_rot = show_rot
+        self.core_masses = core_masses
+        self.yresolution = yresolution
+        self.mass_tolerance = mass_tolerance
+        self.radius_tolerance = radius_tolerance
+        self.decorate_plot = decorate_plot
+        self.show_plot = show_plot
+        self.save_file = save_file
+        self.save_filename = save_filename
                 
-#returns a list of matplotlib path objects with the mixing regions
-def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
-        xaxis_divide, radius_tolerance, mass_tolerance, min_x_coord, max_x_coord):
-   # Get mixing zones and mass borders from history.data files
-   print "Reading history data"
-   mix_data = []
-   histories = []
-   if len(history_names) == 0:
-       history_names = [logs_dir + "/" + "history.data"]
-   for history_name in history_names:
-       history = Mesa_Data(history_name, read_data = False)
-       columns = []
-       for key in history.columns.keys():
-           search_regex = "log_R|star_mass|model_number|.*core_mass|"
-           if yaxis == "radius":
-               search_regex = search_regex + "mix_relr_top.*"
-           else:
-               search_regex = search_regex + "mix_qtop.*"
-           if re.search(search_regex,key):
-               columns.append(key)
-       history.read_data(columns)
-       histories.append(Mesa_Data(history_name))
-   x_coords = []
-   for history in histories:
-       x_coords.extend(history.get(xaxis) / xaxis_divide)
-   y_coords = []
-   if yaxis_normalize:
-       y_coords = [1.0]*len(x_coords)
-   elif yaxis == "radius":
-       for history in histories:
-           y_coords.extend(np.power(10,history.get('log_R')))
-   else:
-       for history in histories:
-           y_coords.extend(history.get('star_mass'))
-
-   print "Constructing mixing regions"
-   mesa_mix_zones = 0
-   while True:
-       try:
-           mesa_mix_zones = mesa_mix_zones + 1
-           mix_type = []
-           mix_top = []
-           for history in histories:
-               mix_type.extend(history.get('mix_type_'+str(mesa_mix_zones)))
-               if yaxis == "radius":
-                    mix_top.extend(history.get('mix_relr_top_'+str(mesa_mix_zones)))
-               else:
-                    mix_top.extend(history.get('mix_qtop_'+str(mesa_mix_zones)))
-           mix_data.append([mix_type, mix_top])
-       except Exception, e:
-           #reached all mix zones included
-           mesa_mix_zones = mesa_mix_zones - 1
-           break
-
-   if yaxis == "radius":
-       tolerance = radius_tolerance
-   else:
-       tolerance = mass_tolerance
-
-   zones = []
-   mix_types = []
-   open_zones = []
-   new_zones = []
-   for i in range(1,len(x_coords)):
-       current_x = x_coords[i]
-       if current_x > max_x_coord:
-           break
-       if current_x < min_x_coord:
-           continue
-       previous_x = x_coords[i-1]
-       for j in range(0,mesa_mix_zones):
-           mix_type = mix_data[j][0][i]
-           if mix_type == 0 or mix_type == -1:
-               continue 
-           max_y_coord = mix_data[j][1][i]*y_coords[i]
-           min_y_coord = 0
-           if j > 0:
-               min_y_coord = mix_data[j-1][1][i]*y_coords[i]
-           #ignore too small regions
-           if max_y_coord - min_y_coord < tolerance*y_coords[i]:
-               continue
-           zone_block = Zone_Block(previous_x, current_x, min_y_coord, max_y_coord)
-           exists = False
-           zones_to_merge = []
-           for z in open_zones:
-               if z.extend(zone_block.vertices[1], zone_block.vertices[1].prev_vertex, mix_type):
-                   exists = True
-                   z.new_blocks.append(zone_block)
-                   zones_to_merge.append(z)
-           #merge zones as needed
-           for k in range(1,len(zones_to_merge)):
-               zones_to_merge[0].merge_zone(zones_to_merge[k])
-               open_zones.remove(zones_to_merge[k])
-           #create zone if it has no predecesor
-           if not exists:
-               z = Zone(zone_block, mix_type)
-               new_zones.append(z)
-       open_zones.extend(new_zones)
-       new_zones = []
-       #separate zones which didn't continue here so we don't need to check them all the time
-       for z in open_zones:
-           z.switch_new_blocks()
-       for z in open_zones:
-           if len(z.last_blocks) == 0:
-               zones.append(z.get_path())
-               mix_types.append(z.mix_type)
-               open_zones.remove(z)
-
-   for z in open_zones:
-       z.switch_new_blocks()
-       zones.append(z.get_path())
-       mix_types.append(z.mix_type)
-
-   return zones, mix_types, x_coords, y_coords, histories
 
 #kipp_plot: Plots a Kippenhahn diagram into the matplotlib axis given. No decoration
 #           done (i.e. axis labeling or colorbars). Returns
-def kipp_plot(
-   axis, #matplotlib axis where data will be plotted
-   ######## MESA DATA
-   #Directory with profile and history data
-   logs_dir = 'LOGS',
-   #List of profile numbers to be plotted. TODO: automate if not specified
-   profile_numbers = [],
-   #List of tuples containing logs_dir and profile number. If used logs_dir and
-   #profile_numbers is ignored. Use if data is spread accross different logs dirs.
-   profile_names = [],
-   #List of paths to history.data files to use instead of default one. Use in case data
-   #is spread among many history.data files, or you have a single one with non-default
-   #location or naming.
-   history_names = [],
+def kipp_plot(kipp_args, axis=None):
+    if axis == None:
+        fig = plt.figure()
+        axis = fig.gca()
 
-   ######## CONTOURS TO PLOT
-   #Strings used as identifiers of data to plot. If not using any custom extractors these
-   #will be used to call get() on the profile.
-   identifiers = [],
-   #Functions that extract from a profile data to plot. Use when data requires more than
-   #a simple get(). The default one is mkipp.default_extractor.
-   extractors = [],
-   #Scales to use to plot each identifier, can be "linear" or "log". If linear, the data
-   #is read as is, if using log, log10 is applied to it.
-   scales = [],
-   #matplotlib colormaps to use for each plot
-   contour_cmaps = [],
-   #Transparencies for contours, useful in case they might overlap. Defaults to 1.0
-   alphas = [],
-   #List of lists containing the levels for each plotted quantity. If empty, levels will
-   #be automatic. If one of the entries is an empty list, levels will be determined automatically
-   #for that field.
-   levels = [],
-   #Scales for the levels. As data can come already in log from the profiles, it needs not match
-   #the values given in "scales"
-   levels_scale = [],
-   #List with the number of levels to use per identifier when using automatic level definition.
-   #If not specified it defaults to 8
-   levels_num = [],
+    #Fill profile and history names if unspecified
+    profile_names = kipp_args.profile_names
+    if len(profile_names) == 0:
+        profile_names = []
+        for log_dir in kipp_args.logs_dirs:
+            profile_names.extend(\
+                    [log_dir+"/profile"+str(int(i))+".data" for i in np.loadtxt(log_dir+"/profiles.index", skiprows = 1, usecols = (2,))])
+    history_names = kipp_args.history_names
+    if len(history_names) == 0:
+        history_names = []
+        for log_dir in kipp_args.logs_dirs:
+            history_names.append(log_dir+"/history.data")
 
-   ######## PLOT OPTIONS (Note Python is case sensitive: True/False)
-   # Either "model_number" or "star_age"
-   xaxis = "model_number",
-   #xaxis is divided by this value. Use to avoid fully writing gigayears or so
-   xaxis_divide = 1,
-   # Xaxis is Log (t_end - t) # TODO: Needs to be implemented
-   xaxis_log_time = False,
-   # Either "mass" or "radius"
-   yaxis = "mass",
-   #Normalize yaxis at each point using total mass/total radius
-   yaxis_normalize = False,
-   # Visualize Convective Regions
-   show_conv = True,
-   # Visualize Thermohaline Regions
-   show_therm = True,
-   # Visualize Semiconvective Regions
-   show_semi = True,
-   # Visualize Overshoot Regions
-   show_over = True,
-   # Visualize Rotationally Mixed Regions
-   show_rot = False,
-   ######## PLOT PARAMETERS
-   #Resolution in yaxis (Standard value: 300. Increase for higher res)
-   #Y direction is divided in this amount of points, and data is interpolated
-   #in between.
-   numy = 1000,
-   # To discard tiny convective regions in mass and/or radius. Value represents
-   # fraction of total mass or radius
-   mass_tolerance = 0.0000001,
-   radius_tolerance = 0.0000001,
-):
-
-   #Fill profile names
-   if len(profile_names) == 0:
-       profile_names = [(logs_dir, number) for number in profile_numbers]
-   #Fill up extractors if not provided
-   if len(extractors) == 0:
-       extractors = [default_extractor]*len(identifiers)
-   #Fill up scales if not provided
-   if len(scales) == 0:
-       scales = ["log"]*len(identifiers)
-
-   # Initialize interpolation grids
-   Z_data_array = np.zeros((len(identifiers),numy,len(profile_names)))
-
-   # XY coordinates for data
-   X_data_array = np.zeros((numy,len(profile_names)))
-   Y_data_array = np.zeros((numy,len(profile_names)))
-
-   # Extract data from profiles
-   max_x_coord = -1
-   min_x_coord = 1e99
-   #first read all headers to determine max value on yaxis
-   max_y = 0
-   print "Reading profile data"
-   if yaxis_normalize:
-       max_y = star_mass = star_radius = 1.0
-   else:
-       for i,profile_name in enumerate(profile_names):
-           try:
-               prof = Mesa_Data(profile_name[0]+"/profile"+str(profile_name[1])+".data", only_read_header = True)
-           except Exception as e:
-               print "Couldn't read profile number " + str(profile_name[1]) + " in folder " + profile_name[0]
-           if yaxis == "mass":
-               max_y = max(prof.header['star_mass'],max_y)
-           elif yaxis == "radius":
-               max_y = max(prof.header['photosphere_r'],max_y)
-   #array to interpolate data in the yaxis
-   y_interp = np.array([max_y * j / (numy-1) for j in range(numy)])
-   #now read the data
-   #these are the neccesary columns that will be parsed
-   columns = []
-   if yaxis == "mass":
-       columns.append('mass')
-   elif yaxis == "radius":
-       columns.append('radius')
-   for k in range(len(identifiers)):
-       columns.extend(extractors[k](identifiers[k], scales[k], prof, return_data_columns = True))
-   for i,profile_name in enumerate(profile_names):
-       try:
-           prof = Mesa_Data(profile_name[0]+"/profile"+str(profile_name[1])+".data", read_data = False)
-       except Exception as e:
-           print "Couldn't read profile number " + str(profile_name[1]) + " in folder " + profile_name[0]
-       x_coord = prof.header[xaxis] / xaxis_divide
-       if x_coord < max_x_coord:
-           print "Profiles are not ordered in X coordinate!!!"
-       max_x_coord = max(max_x_coord, x_coord)
-       min_x_coord = min(min_x_coord, x_coord)
-
-       #fill up positions
-       for j in range(numy):
-           X_data_array[j,i] = x_coord
-           Y_data_array[j,i] = max_y * j / (numy-1)
-
-       prof.read_data(columns)
-       
-       #read and interpolate data
-       if yaxis == "mass":
-           y_data = prof.get('mass')
-       elif yaxis == "radius":
-           y_data = prof.get('radius')
-       #reverse y_data and z_data for np.interp
-       y_data = y_data[::-1]
-       for k in range(len(identifiers)):
-           z_data = extractors[k](identifiers[k], scales[k], prof)
-           z_data = z_data[::-1]
-           interp_z_data = np.interp(y_interp, y_data, z_data)
-           for j in range(numy):
-               Z_data_array[k,j,i] = interp_z_data[j]
-
-   #Fill defaults for levels and alpha
-   if len(levels) == 0:
-       levels = [[] for k in range(len(identifiers))]
-   if len(levels_scale) == 0:
-       levels_scale = ["log"]*len(identifiers)
-   if len(levels_num) == 0:
-       levels_num = [8]*len(identifiers)
-   if len(alphas) == 0:
-       alphas = [1.0]*len(identifiers)
-   #Get levels that are undefined and plot
-   plots = {}
-   for k in range(len(identifiers)):
-       if len(levels[k]) == 0:
-           if levels_scale[k] == "log":
-               levels[k] = get_levels_log(np.min(Z_data_array[k,:,:]), np.max(Z_data_array[k,:,:]), \
-                       levels_num[k])
-           elif levels_scale[k] == "linear":
-               levels[k] = get_levels_linear(np.min(Z_data_array[k,:,:]), np.max(Z_data_array[k,:,:]), \
-                       levels_num[k])
-           else:
-               print "unkown level scale " + levels_scale + " for identifier " + identifiers[k]
-
-       #make plot
-       plots[identifiers[k]] = axis.contourf(X_data_array, Y_data_array, Z_data_array[k,:,:], \
-               cmap=contour_cmaps[k], levels=levels[k], alpha=alphas[k], antialiased = False)
-
-   zones, mix_types, x_coords, y_coords, histories = get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
-           xaxis_divide, radius_tolerance, mass_tolerance, min_x_coord, max_x_coord)
-
-   for i,zone in enumerate(zones):
-       color = ""
-       #Convective mixing
-       if mix_types[i] == 1 and show_conv:
-           color = "Chartreuse"
-           hatch = "//"
-           line  = 1
-       #Overshooting 
-       elif mix_types[i] == 3 and show_over:
-           color = "purple"
-           hatch = "x"
-           line  = 1
-       #Semiconvective mixing
-       elif mix_types[i] == 4 and show_semi:
-           color = "red"
-           hatch = "\\\\"
-           line  = 1
-       #Thermohaline mixing
-       elif mix_types[i] == 5 and show_therm:
-           color = "Gold" #Salmon
-           hatch = "||"
-           line  = 1
-       #Rotational mixing
-       elif mix_types[i] == 6 and show_rot:
-           color = "brown"
-           hatch = "*"
-           line  = 1
-       #Anonymous mixing
-       else: 
-           color = "white"
-           hatch = " "
-           line = 0
-       axis.add_patch(PathPatch(zone, fill=False, hatch = hatch, edgecolor=color, linewidth=line))
-
-   #limit x_coords to data of contours and add line at stellar surface
-   for i, x_coord in enumerate(x_coords):
-       if x_coord > max_x_coord:
-           break
-   axis.plot(x_coords[:i], y_coords[:i], "k-")
-
-   return plots, histories, [min_x_coord, max_x_coord]
-
-#full_kipp_plot: Uses kipp_plot but adds default decorations and default plotting options.
-#                All options except for "contour_plots", "core_masses", "save_file" and "save_filename"
-#                are fed directly into kipp_plot
-def decorated_kipp_plot(
-   ######## MESA DATA
-   #Directory with profile and history data
-   logs_dir = 'LOGS',
-   #List of profile numbers to be plotted. TODO: automate if not specified
-   profile_numbers = [],
-   #List of tuples containing logs_dir and profile number. If used logs_dir and
-   #profile_numbers is ignored. Use if data is spread accross different logs dirs.
-   profile_names = [],
-   #List of paths to history.data files to use instead of default one. Use in case data
-   #is spread among many history.data files, or you have a single one with non-default
-   #location or naming.
-   history_names = [],
-
-   ######## CONTOURS TO PLOT
-   #Strings with contours to plot. Possible choices are
-   #- eps_nuc          : log10 |eps_nuc-eps_nu|
-   contour_plots = [],
-   #Strings with core masses to plot. Options are "He", "C" and "O". Only for yaxis=mass
-   core_masses = [],
-   #Units for time axis, choices are "yr", "1000 yr", "Myr", "Gyr"
-   time_units = "yr",
-
-   ######## PLOT OPTIONS (Note Python is case sensitive: True/False)
-   # Either "model_number" or "star_age"
-   xaxis = "model_number",
-   # Xaxis is Log (t_end - t) # TODO: Needs to be implemented
-   xaxis_log_time = False,
-   # Either "mass" or "radius"
-   yaxis = "mass",
-   #Normalize yaxis at each point using total mass/total radius
-   yaxis_normalize = False,
-   # Visualize Convective Regions
-   show_conv = True,
-   # Visualize Thermohaline Regions
-   show_therm = True,
-   # Visualize Semiconvective Regions
-   show_semi = True,
-   # Visualize Overshoot Regions
-   show_over = True,
-   # Visualize Rotationally Mixed Regions
-   show_rot = False,
-   ######## PLOT PARAMETERS
-   #Resolution in yaxis (Standard value: 300. Increase for higher res)
-   #Y direction is divided in this amount of points, and data is interpolated
-   #in between.
-   numy = 300,
-   # To discard tiny convective regions in mass and/or radius. Value represents
-   # fraction of total mass or radius
-   mass_tolerance = 0.001,
-   radius_tolerance = 0.001,
-
-   #Options for file saving. If not saving a file, a plt.show() is done.
-   save_file = True,
-   save_filename = "Kippenhahn.pdf"
-):
-    identifiers = []
-    extractors = []
-    scales = []
-    levels_scale = []
-    contour_cmaps = []
-    settings = { 
-            "eps_nuc" : ["eps_nuc", default_extractor, "log", "log", "Blues"],
-            }
-    for contour_plot in contour_plots:
-        identifiers.append(settings[contour_plot][0])
-        extractors.append(settings[contour_plot][1])
-        scales.append(settings[contour_plot][2])
-        levels_scale.append(settings[contour_plot][3])
-        contour_cmaps.append(plt.get_cmap(settings[contour_plot][4]))
-
-    xaxis_divide = 1
-    if xaxis == "star_age":
-        if time_units == "1000 yr":
+    xaxis_divide = kipp_args.xaxis_divide
+    if kipp_args.xaxis == "star_age":
+        if kipp_args.time_units == "1000 yr":
             xaxis_divide = 1000
-        elif time_units == "Myr":
+        elif kipp_args.time_units == "Myr":
             xaxis_divide = 1e6
-        elif time_units == "Gyr":
+        elif kipp_args.time_units == "Gyr":
             xaxis_divide = 1e9
 
-    #create plot
-    fig = plt.figure()
-    axis = fig.add_subplot(111)
-    plots, histories, xlimits = kipp_plot(axis, logs_dir = logs_dir, profile_numbers = profile_numbers, profile_names = profile_names,
-            history_names = history_names, identifiers = identifiers, extractors = extractors,
-            scales = scales, contour_cmaps = contour_cmaps, levels_scale = levels_scale,
-            xaxis = xaxis, xaxis_divide = xaxis_divide, xaxis_log_time = xaxis_log_time, yaxis = yaxis, yaxis_normalize = yaxis_normalize,
-            show_conv = show_conv, show_therm = show_therm, show_semi = show_semi, show_over = show_over,
-            show_rot = show_rot, numy = numy, mass_tolerance = mass_tolerance, radius_tolerance = radius_tolerance)
+    # Initialize interpolation grids
+    Z_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
 
-    axis.set_xlim(xlimits)
+    # XY coordinates for data
+    X_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
+    Y_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
 
+    # Extract data from profiles
+    max_x_coord = -1
+    min_x_coord = 1e99
+    #first read all headers to determine max value on yaxis
+    max_y = 0
+    print "Reading profile data"
+    if kipp_args.yaxis_normalize:
+        max_y = star_mass = star_radius = 1.0
+    else:
+        for i,profile_name in enumerate(profile_names):
+            try:
+                prof = Mesa_Data(profile_name, only_read_header = True)
+                if kipp_args.yaxis == "mass":
+                    max_y = max(prof.header['star_mass'],max_y)
+                elif kipp_args.yaxis == "radius":
+                    max_y = max(prof.header['photosphere_r'],max_y)
+            except Exception as e:
+                print "Couldn't read profile " + profile_name
+    #array to interpolate data in the yaxis
+    y_interp = np.array([max_y * j / (kipp_args.yresolution-1) for j in range(kipp_args.yresolution)])
+    #now read the data
+    #"columns" is a list with the neccesary columns that will be parsed from the profile*.data files
+    columns = []
+    if kipp_args.yaxis == "mass":
+        columns.append('mass')
+    elif kipp_args.yaxis == "radius":
+        columns.append('radius')
+    columns.extend(kipp_args.extractor(\
+            kipp_args.identifier, kipp_args.log10_on_data, prof, return_data_columns = True))
+    for i,profile_name in enumerate(profile_names):
+        try:
+            prof = Mesa_Data(profile_name, read_data = False)
+        except Exception as e:
+            print "Couldn't read profile " + profile_name
+        x_coord = prof.header[kipp_args.xaxis] / xaxis_divide
+        if x_coord < max_x_coord:
+            print "Profiles are not ordered in X coordinate!!!"
+        max_x_coord = max(max_x_coord, x_coord)
+        min_x_coord = min(min_x_coord, x_coord)
+
+        #fill up positions
+        for j in range(kipp_args.yresolution):
+            X_data_array[j,i] = x_coord
+            Y_data_array[j,i] = max_y * j / (kipp_args.yresolution-1)
+
+        prof.read_data(columns)
+        
+        #read and interpolate data
+        y_data = prof.get(kipp_args.yaxis)
+        #reverse y_data and z_data for np.interp
+        y_data = y_data[::-1]
+        z_data = kipp_args.extractor(kipp_args.identifier, kipp_args.log10_on_data, prof)
+        z_data = z_data[::-1]
+        interp_z_data = np.interp(y_interp, y_data, z_data)
+        #for j in range(kipp_args.numy):
+        Z_data_array[:,i] = interp_z_data[:]
+
+    #Get levels if undefined
+    levels = kipp_args.levels
+    if len(levels) == 0:
+        if kipp_args.log_levels:
+            levels = get_levels_log(np.min(Z_data_array[:,:]), np.max(Z_data_array[:,:]), \
+                    kipp_args.num_levels)
+        else:
+            levels = get_levels_linear(np.min(Z_data_array[:,:]), np.max(Z_data_array[:,:]), \
+                    kipp_args.num_levels)
+    #make plot
+    contour_plot = axis.contourf(X_data_array, Y_data_array, Z_data_array[:,:], \
+                cmap=kipp_args.contour_colormap, levels=levels, antialiased = False)
+
+    zones, mix_types, x_coords, y_coords, histories = get_mixing_zones(\
+            kipp_args.logs_dirs, history_names, kipp_args.yaxis_normalize, kipp_args.xaxis, kipp_args.yaxis, \
+            xaxis_divide, kipp_args.radius_tolerance, kipp_args.mass_tolerance, min_x_coord, max_x_coord)
+
+    for i,zone in enumerate(zones):
+        color = ""
+        #Convective mixing
+        if mix_types[i] == 1 and kipp_args.show_conv:
+            color = "Chartreuse"
+            hatch = "//"
+            line  = 1
+        #Overshooting 
+        elif mix_types[i] == 3 and kipp_args.show_over:
+            color = "purple"
+            hatch = "x"
+            line  = 1
+        #Semiconvective mixing
+        elif mix_types[i] == 4 and kipp_args.show_semi:
+            color = "red"
+            hatch = "\\\\"
+            line  = 1
+        #Thermohaline mixing
+        elif mix_types[i] == 5 and kipp_args.show_therm:
+            color = "Gold" #Salmon
+            hatch = "||"
+            line  = 1
+        #Rotational mixing
+        elif mix_types[i] == 6 and kipp_args.show_rot:
+            color = "brown"
+            hatch = "*"
+            line  = 1
+        #Anonymous mixing
+        else: 
+            color = "white"
+            hatch = " "
+            line = 0
+        axis.add_patch(PathPatch(zone, fill=False, hatch = hatch, edgecolor=color, linewidth=line))
+
+    #limit x_coords to data of contours and add line at stellar surface
+    for i, x_coord in enumerate(x_coords):
+        if x_coord > max_x_coord:
+            break
+    axis.plot(x_coords[:i], y_coords[:i], "k-")
     #add core masses
-    if yaxis == "mass":
-        for core_mass in core_masses:
+    if kipp_args.yaxis == "mass":
+        for core_mass in kipp_args.core_masses:
             if core_mass == "He":
                 field_name = "he_core_mass"
                 color = "b:"
@@ -604,33 +310,33 @@ def decorated_kipp_plot(
                 field_name = "o_core_mass"
                 color = "g:"
             for history in histories:
-                axis.plot(history.get(xaxis) / xaxis_divide, history.get(field_name), color)
+                axis.plot(history.get(kipp_args.xaxis) / xaxis_divide, history.get(field_name), color)
 
-    #add colorbars
-    labels = {
-            "eps_nuc" : '$\epsilon_{nuc}-\epsilon_{\\nu}$,  Log (erg/g/s)',
-            }
-    for key, plot in plots.iteritems():
-        bar = plt.colorbar(plot,pad=0.05)
-        bar.set_label(labels[key])
+    if kipp_args.decorate_plot:
+        #add colorbar
+        bar = plt.colorbar(contour_plot,pad=0.05)
+        bar.set_label('$\epsilon_{nuc}-\epsilon_{\\nu}$,  Log (erg/g/s)')
 
-    #add axis labels
-    if xaxis == "star_age":
-        axis.set_xlabel(r'$t$ ('+time_units+')')
-    else:
-        axis.set_xlabel(r'$Model Number$')
-    if yaxis == "radius":
-        if yaxis_normalize:
-            axis.set_ylabel(r'$r/R$')
-        else:   
-            axis.set_ylabel(r'$r/R_\odot$')
-    else:
-        if yaxis_normalize:
-            axis.set_ylabel(r'$m/M$')
-        else:   
-            axis.set_ylabel(r'$m/M_\odot$')
+        #add axis labels
+        if kipp_args.xaxis == "star_age":
+            axis.set_xlabel(r'$t$ ('+kipp_args.time_units+')')
+        else:
+            axis.set_xlabel(r'$Model Number$')
+        if kipp_args.yaxis == "radius":
+            if kipp_args.yaxis_normalize:
+                axis.set_ylabel(r'$r/R$')
+            else:   
+                axis.set_ylabel(r'$r/R_\odot$')
+        else:
+            if kipp_args.yaxis_normalize:
+                axis.set_ylabel(r'$m/M$')
+            else:   
+                axis.set_ylabel(r'$m/M_\odot$')
 
-    if save_file:
-        plt.savefig(save_filename)
-    else:
+    if kipp_args.show_plot:
         plt.show()
+    if kipp_args.save_file:
+        plt.savefig(kipp_args.save_filename)
+
+    return contour_plot, histories, [min_x_coord, max_x_coord]
+
