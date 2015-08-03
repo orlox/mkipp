@@ -21,7 +21,7 @@ Requirements: history.data and profiles.data containing
 import numpy as np
 from math import log10, pi
 from mesa_data import *
-from mixing_zones import *
+from kipp_data import *
 
 #matplotlib specifics
 import matplotlib.pyplot as plt
@@ -30,7 +30,6 @@ from matplotlib.path import Path
 # Create contour levels array (TBD: Need to be improved)
 def get_levels_linear(min,max,n_levels):
     delta = (max-min)/n_levels
-    print min, max, delta, n_levels
     levels = np.arange(min-delta,max+delta,delta)
     return levels;
     
@@ -177,86 +176,25 @@ def kipp_plot(kipp_args, axis=None):
         elif kipp_args.time_units == "Gyr":
             xaxis_divide = 1e9
 
-    # Initialize interpolation grids
-    Z_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
-
-    # XY coordinates for data
-    X_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
-    Y_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
-
-    # Extract data from profiles
-    max_x_coord = -1
-    min_x_coord = 1e99
-    #first read all headers to determine max value on yaxis
-    max_y = 0
-    print "Reading profile data"
-    if kipp_args.yaxis_normalize:
-        max_y = star_mass = star_radius = 1.0
-    else:
-        for i,profile_name in enumerate(profile_names):
-            try:
-                prof = Mesa_Data(profile_name, only_read_header = True)
-                if kipp_args.yaxis == "mass":
-                    max_y = max(prof.header['star_mass'],max_y)
-                elif kipp_args.yaxis == "radius":
-                    max_y = max(prof.header['photosphere_r'],max_y)
-            except Exception as e:
-                print "Couldn't read profile " + profile_name
-    #array to interpolate data in the yaxis
-    y_interp = np.array([max_y * j / (kipp_args.yresolution-1) for j in range(kipp_args.yresolution)])
-    #now read the data
-    #"columns" is a list with the neccesary columns that will be parsed from the profile*.data files
-    columns = []
-    if kipp_args.yaxis == "mass":
-        columns.append('mass')
-    elif kipp_args.yaxis == "radius":
-        columns.append('radius')
-    columns.extend(kipp_args.extractor(\
-            kipp_args.identifier, kipp_args.log10_on_data, prof, return_data_columns = True))
-    for i,profile_name in enumerate(profile_names):
-        try:
-            prof = Mesa_Data(profile_name, read_data = False)
-        except Exception as e:
-            print "Couldn't read profile " + profile_name
-        x_coord = prof.header[kipp_args.xaxis] / xaxis_divide
-        if x_coord < max_x_coord:
-            print "Profiles are not ordered in X coordinate!!!"
-        max_x_coord = max(max_x_coord, x_coord)
-        min_x_coord = min(min_x_coord, x_coord)
-
-        #fill up positions
-        for j in range(kipp_args.yresolution):
-            X_data_array[j,i] = x_coord
-            Y_data_array[j,i] = max_y * j / (kipp_args.yresolution-1)
-
-        prof.read_data(columns)
-        
-        #read and interpolate data
-        y_data = prof.get(kipp_args.yaxis)
-        #reverse y_data and z_data for np.interp
-        y_data = y_data[::-1]
-        z_data = kipp_args.extractor(kipp_args.identifier, kipp_args.log10_on_data, prof)
-        z_data = z_data[::-1]
-        interp_z_data = np.interp(y_interp, y_data, z_data)
-        #for j in range(kipp_args.numy):
-        Z_data_array[:,i] = interp_z_data[:]
+    min_x_coord, max_x_coord, X_data_array, Y_data_array, Z_data_array = \
+            get_xyz_data(profile_names, xaxis_divide, kipp_args)
 
     #Get levels if undefined
     levels = kipp_args.levels
     if len(levels) == 0:
         if kipp_args.log_levels:
-            levels = get_levels_log(np.min(Z_data_array[:,:]), np.max(Z_data_array[:,:]), \
+            levels = get_levels_log(np.nanmin(Z_data_array[:,:]), np.nanmax(Z_data_array[:,:]), \
                     kipp_args.num_levels)
         else:
-            levels = get_levels_linear(np.min(Z_data_array[:,:]), np.max(Z_data_array[:,:]), \
+            levels = get_levels_linear(np.nanmin(Z_data_array[:,:]), np.nanmax(Z_data_array[:,:]), \
                     kipp_args.num_levels)
     #make plot
     contour_plot = axis.contourf(X_data_array, Y_data_array, Z_data_array[:,:], \
                 cmap=kipp_args.contour_colormap, levels=levels, antialiased = False)
 
     zones, mix_types, x_coords, y_coords, histories = get_mixing_zones(\
-            kipp_args.logs_dirs, history_names, kipp_args.yaxis_normalize, kipp_args.xaxis, kipp_args.yaxis, \
-            xaxis_divide, kipp_args.radius_tolerance, kipp_args.mass_tolerance, min_x_coord, max_x_coord)
+            history_names, xaxis_divide, min_x_coord, max_x_coord, kipp_args)
+
 
     for i,zone in enumerate(zones):
         color = ""
@@ -296,6 +234,7 @@ def kipp_plot(kipp_args, axis=None):
     for i, x_coord in enumerate(x_coords):
         if x_coord > max_x_coord:
             break
+    axis.fill_between(x_coords, max(y_coords), y_coords, color = "w")
     axis.plot(x_coords[:i], y_coords[:i], "k-")
     #add core masses
     if kipp_args.yaxis == "mass":
@@ -315,7 +254,7 @@ def kipp_plot(kipp_args, axis=None):
     if kipp_args.decorate_plot:
         #add colorbar
         bar = plt.colorbar(contour_plot,pad=0.05)
-        bar.set_label('$\epsilon_{nuc}-\epsilon_{\\nu}$,  Log (erg/g/s)')
+        bar.set_label(kipp_args.identifier)
 
         #add axis labels
         if kipp_args.xaxis == "star_age":

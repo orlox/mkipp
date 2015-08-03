@@ -101,20 +101,17 @@ class Zone:
         self.new_blocks.extend(zone2.new_blocks)
 
 #returns a list of matplotlib path objects with the mixing regions
-def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
-        xaxis_divide, radius_tolerance, mass_tolerance, min_x_coord, max_x_coord):
+def get_mixing_zones(history_names, xaxis_divide, min_x_coord, max_x_coord, kipp_args):
    # Get mixing zones and mass borders from history.data files
    print "Reading history data"
    mix_data = []
    histories = []
-   if len(history_names) == 0:
-       history_names = [logs_dir + "/" + "history.data"]
    for history_name in history_names:
        history = Mesa_Data(history_name, read_data = False)
        columns = []
        for key in history.columns.keys():
            search_regex = "log_R|star_mass|model_number|.*core_mass|"
-           if yaxis == "radius":
+           if kipp_args.yaxis == "radius":
                search_regex = search_regex + "mix_relr_top.*"
            else:
                search_regex = search_regex + "mix_qtop.*"
@@ -124,11 +121,11 @@ def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
        histories.append(Mesa_Data(history_name))
    x_coords = []
    for history in histories:
-       x_coords.extend(history.get(xaxis) / xaxis_divide)
+       x_coords.extend(history.get(kipp_args.xaxis) / xaxis_divide)
    y_coords = []
-   if yaxis_normalize:
+   if kipp_args.yaxis_normalize:
        y_coords = [1.0]*len(x_coords)
-   elif yaxis == "radius":
+   elif kipp_args.yaxis == "radius":
        for history in histories:
            y_coords.extend(np.power(10,history.get('log_R')))
    else:
@@ -144,7 +141,7 @@ def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
            mix_top = []
            for history in histories:
                mix_type.extend(history.get('mix_type_'+str(mesa_mix_zones)))
-               if yaxis == "radius":
+               if kipp_args.yaxis == "radius":
                     mix_top.extend(history.get('mix_relr_top_'+str(mesa_mix_zones)))
                else:
                     mix_top.extend(history.get('mix_qtop_'+str(mesa_mix_zones)))
@@ -154,10 +151,10 @@ def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
            mesa_mix_zones = mesa_mix_zones - 1
            break
 
-   if yaxis == "radius":
-       tolerance = radius_tolerance
+   if kipp_args.yaxis == "radius":
+       tolerance = kipp_args.radius_tolerance
    else:
-       tolerance = mass_tolerance
+       tolerance = kipp_args.mass_tolerance
 
    zones = []
    mix_types = []
@@ -214,3 +211,78 @@ def get_mixing_zones(logs_dir, history_names, yaxis_normalize, xaxis, yaxis, \
        mix_types.append(z.mix_type)
 
    return zones, mix_types, x_coords, y_coords, histories
+
+def get_xyz_data(profile_names, xaxis_divide, kipp_args):
+    # Extract data from profiles
+    max_x_coord = -1
+    min_x_coord = 1e99
+    #first read all headers to determine max value on yaxis
+    max_y = 0
+    print "Reading profile data"
+    if kipp_args.yaxis_normalize:
+        max_y = star_mass = star_radius = 1.0
+    else:
+        for i,profile_name in enumerate(profile_names):
+            try:
+                prof = Mesa_Data(profile_name, only_read_header = True)
+                if kipp_args.yaxis == "mass":
+                    max_y = max(prof.header['star_mass'],max_y)
+                elif kipp_args.yaxis == "radius":
+                    max_y = max(prof.header['photosphere_r'],max_y)
+            except Exception as e:
+                print "Couldn't read profile " + profile_name
+    #array to interpolate data in the yaxis
+    y_interp = np.array([max_y * j / (kipp_args.yresolution-1) for j in range(kipp_args.yresolution)])
+    #now read the data
+    #"columns" is a list with the neccesary columns that will be parsed from the profile*.data files
+    columns = []
+    if kipp_args.yaxis == "mass":
+        columns.append('mass')
+    elif kipp_args.yaxis == "radius":
+        columns.append('radius')
+    columns.extend(kipp_args.extractor(\
+            kipp_args.identifier, kipp_args.log10_on_data, prof, return_data_columns = True))
+    # Initialize interpolation grid
+    Z_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
+    # XY coordinates for data
+    X_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
+    Y_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
+    for j in range(kipp_args.yresolution):
+        Y_data_array[j,:] = max_y * j / (kipp_args.yresolution-1)
+    for i,profile_name in enumerate(profile_names):
+        try:
+            prof = Mesa_Data(profile_name, read_data = False)
+            prof.read_data(columns)
+        except Exception as e:
+            print "Couldn't read profile " + profile_name
+        x_coord = prof.header[kipp_args.xaxis] / xaxis_divide
+        if x_coord < max_x_coord:
+            print "Profiles are not ordered in X coordinate!!!"
+        max_x_coord = max(max_x_coord, x_coord)
+        min_x_coord = min(min_x_coord, x_coord)
+        if kipp_args.yaxis == "mass":
+            prof_y = prof.header['star_mass']
+        elif kipp_args.yaxis == "radius":
+            prof_y = prof.header['photosphere_r']
+
+        #fill up X positions
+        X_data_array[:,i] = x_coord
+
+        #read and interpolate data
+        if kipp_args.yaxis == "mass":
+            y_data = prof.get('mass')
+        elif kipp_args.yaxis == "radius":
+            y_data = prof.get('radius')
+        #reverse y_data and z_data for np.interp
+        y_data = y_data[::-1]
+        z_data = kipp_args.extractor(kipp_args.identifier, kipp_args.log10_on_data, prof)
+        z_data = z_data[::-1]
+        interp_z_data = np.interp(y_interp, y_data, z_data)
+        #set nans outside of range so there is no plotting
+        #for j in range(kipp_args.yresolution):
+        #    if (Y_data_array[j,i] > prof_y):
+        #        Z_data_array[j,i] = np.nan
+        #    else:
+        Z_data_array[:,i] = interp_z_data
+
+    return min_x_coord, max_x_coord, X_data_array, Y_data_array, Z_data_array
