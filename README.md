@@ -20,7 +20,77 @@ mkipp.kipp_plot(mkipp.Kipp_Args())
 results in the following plot
 ![kipp](Kippenhahn.png)
 
-Several options are available, and also a matplotlib axis object can be passed to kipp_plot. This allows plot decorations to be made independently, or can be also used to make a plot with many different Kippenhahn plots. As an example, the following plots evolution of Helium abundance with respect to time for the same model as before
+Several options can be passed to mkipp.Kipp_Args():
+```python
+#properties of the plotter
+class Kipp_Args:
+    def __init__(self,
+            logs_dirs = ['LOGS'],
+            profile_names = [],
+            history_names = [],
+            identifier = "eps_nuc",
+            extractor = default_extractor,
+            log10_on_data = True,
+            contour_colormap = plt.get_cmap("Blues"),
+            levels = [],
+            log_levels = True,
+            num_levels = 8,
+            xaxis = "model_number",
+            xaxis_divide = 1.0,
+            time_units = "Myr",
+            yaxis = "mass",
+            yaxis_normalize = False,
+            show_conv = True, show_therm = True, show_semi = True, show_over = True, show_rot = False,
+            core_masses = ["He","C","O"],
+            yresolution = 1000,
+            mass_tolerance = 0.0000001,
+            radius_tolerance = 0.0000001,
+            decorate_plot = True,
+            show_plot = False,
+            save_file = True,
+            save_filename = "Kippenhahn.png"):
+        """Initializes properties for a Kippenhahn plot
+        Note:
+            All arguments are optional, if not provided defaults are assigned
+        Args:
+            logs_dir (List[str]): List of paths to MESA LOGS directories. If profile_names and
+                history_names are not provided, they are automatically generated from logs_dir.
+            profile_names (List[str]): List of paths to MESA profile files.
+            history_names (List[str]): List of paths to MESA history files.
+            identifier (str): String used as identifier of data to plot. If not using any custom
+                extractors this is simply the column name in the profile file that will be extracted.
+                Default uses eps_nuc.
+            extractor : TODO, explain
+            log10_on_data (bool): Determines if log10(abs()) is applied to profile data
+            contour_colormap (matplotlib.cm): matplotlib color map used to plot contours
+            levels (List): List of fixed levels for contour plot (int or float)
+            log_levels (bool): if levels is an empty list then they are auto-generated. This
+                variable specifies if the date is the log of a quantity or not, in order to
+                produce discrete integer levels.
+            num_levels (int): Number of automatically generated levels
+            xaxis (str): variable for the xaxis, either "model_number" or "star_age"
+            xaxis_divide (float): divide xaxis by this value
+            time_units (str): When using xaxis = "star_age" this specifies the unit of time
+                and sets the value of xaxis_divide. Options are "yr", "Myr" and "Gyr"
+            yaxis (str): Quantity plotted in the yaxis. Either "mass" or "radius"
+            yaxis_normalize (bool): If True Normalize yaxis at each point using total mass/total radius
+            show_conv, show_therm, show_semi, show_over, show_rot (bool): Specifies whether or
+                certain mixing regions are displayed.
+            core_masses (List(str)): Strings with core masses to plot. Options are "He", "C" and "O".
+                Only for yaxis=mass
+            yresolution (int): resolution for contour plotting
+            mass_tolerance (float): ignore mixing regions smaller than this in solar masses. Ignored
+                if yaxis="radius"
+            radius_tolerance (float): ignore mixing regions smaller than this in solar radii. Ignored
+                if yaxis="mass"
+            decorate_plot (bool): If True, then axis labels are included.
+            show_plot (bool): If True, pyplot.show() is ran at the end
+            save_file (bool): If True, plot is saved after pyplot.show()
+            save_filename (str): Filename to save plot. Extension determines filetype.
+        """
+```
+
+Also a matplotlib axis object can be passed to kipp_plot. This allows plot decorations to be made independently, or can be also used to make a plot with many different Kippenhahn plots. As an example, the following plots evolution of Helium abundance with respect to time for the same model as before
 ```python
 import mkipp
 import matplotlib.pyplot as plt
