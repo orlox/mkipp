@@ -5,25 +5,25 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import PathPatch
 import numpy as np
 
-##simple example (saves to default filename Kippenhahn.png)
-#mkipp.kipp_plot(mkipp.Kipp_Args())
-#
-##plot of Helium abundance against time, independent decoration
-#fig = plt.figure()
-#axis = plt.gca()
-#contour_plot, histories, xlims = mkipp.kipp_plot(mkipp.Kipp_Args(
-#        xaxis = "star_age",
-#        time_units = "Myr",
-#        identifier = "y",
-#        log10_on_data = False,
-#        levels = np.arange(0.0,1.001,0.01),
-#        decorate_plot = False,
-#        save_file = False), axis = axis)
-#bar = plt.colorbar(contour_plot,pad=0.05)
-#bar.set_label("Helium abundance")
-#axis.set_xlabel("Time (Myr)")
-#axis.set_ylabel("Mass (solar masses)")
-#plt.savefig("Kippenhahn2.png")
+#simple example (saves to default filename Kippenhahn.png)
+mkipp.kipp_plot(mkipp.Kipp_Args())
+
+#plot of Helium abundance against time, independent decoration
+fig = plt.figure()
+axis = plt.gca()
+contour_plot, histories, xlims = mkipp.kipp_plot(mkipp.Kipp_Args(
+        xaxis = "star_age",
+        time_units = "Myr",
+        identifier = "y",
+        log10_on_data = False,
+        levels = np.arange(0.0,1.001,0.01),
+        decorate_plot = False,
+        save_file = False), axis = axis)
+bar = plt.colorbar(contour_plot,pad=0.05)
+bar.set_label("Helium abundance")
+axis.set_xlabel("Time (Myr)")
+axis.set_ylabel("Mass (solar masses)")
+plt.savefig("Kippenhahn2.png")
 
 #Reading out mixing regions and data, and plotting independently
 kipp_args = mkipp.Kipp_Args()
