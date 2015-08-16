@@ -3,7 +3,9 @@ Kippenhahn plotter for MESA. BEWARE: this README might be out of date! In case t
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-IMPORTANT!! your history_columns.list needs to have mixing_regions and mix_relr_regions specified for MESA to output the neccesary data of the mixing regions.
+IMPORTANT!! your history_columns.list needs to have mixing_regions and mix_relr_regions specified for MESA to output the neccesary data of the mixing regions in terms of mass and radius respectively.
+
+ALSO IMPORTANT!! mesa_data.py deals with reading mesa output files but does not clean history files in case of restarts. So plotting models with restars should be a bit messy right now.
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
