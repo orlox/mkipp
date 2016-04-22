@@ -2,6 +2,7 @@ from matplotlib.path import Path
 from matplotlib.patches import PathPatch
 from mesa_data import *
 import re
+from collections import namedtuple
 
 # Someday, if I remember, I might explain how this works
 # Class used to store mixing zones
@@ -101,120 +102,124 @@ class Zone:
         self.new_blocks.extend(zone2.new_blocks)
 
 #returns a list of matplotlib path objects with the mixing regions
-def get_mixing_zones(history_names, xaxis_divide, min_x_coord, max_x_coord, kipp_args):
-   # Get mixing zones and mass borders from history.data files
-   print "Reading history data"
-   mix_data = []
-   histories = []
-   for history_name in history_names:
-       history = Mesa_Data(history_name, read_data = False)
-       columns = []
-       for key in history.columns.keys():
-           search_regex = "log_R|star_mass|model_number|.*core_mass|"
-           if kipp_args.yaxis == "radius":
-               search_regex = search_regex + "mix_relr_top.*"
-           else:
-               search_regex = search_regex + "mix_qtop.*"
-           if re.search(search_regex,key):
-               columns.append(key)
-       history.read_data(columns)
-       histories.append(Mesa_Data(history_name))
-   x_coords = []
-   for history in histories:
-       x_coords.extend(history.get(kipp_args.xaxis) / xaxis_divide)
-   y_coords = []
-   if kipp_args.yaxis_normalize:
-       y_coords = [1.0]*len(x_coords)
-   elif kipp_args.yaxis == "radius":
-       for history in histories:
-           y_coords.extend(np.power(10,history.get('log_R')))
-   else:
-       for history in histories:
-           y_coords.extend(history.get('star_mass'))
+def get_mixing_zones(history_names, xaxis_divide, xlims, kipp_args):
+    # Get mixing zones and mass borders from history.data files
+    print "Reading history data"
+    mix_data = []
+    histories = []
+    for history_name in history_names:
+        history = Mesa_Data(history_name, read_data = False)
+        columns = []
+        for key in history.columns.keys():
+            search_regex = "log_R|star_mass|model_number|star_age|.*core_mass|mix_type.*|"
+            for extra_col in kipp_args.extra_history_cols:
+                search_regex = search_regex + extra_col + "|"
+            if kipp_args.yaxis == "radius":
+                search_regex = search_regex + "mix_relr_top.*"
+            else:
+                search_regex = search_regex + "mix_qtop.*"
+            if re.search(search_regex,key):
+                columns.append(key)
+        history.read_data(columns, clean_data = kipp_args.clean_data)
+        histories.append(history)
+    x_coords = []
+    for history in histories:
+        x_coords.extend(history.get(kipp_args.xaxis) / xaxis_divide)
+    y_coords = []
+    if kipp_args.yaxis_normalize:
+        y_coords = [1.0]*len(x_coords)
+    elif kipp_args.yaxis == "radius":
+        for history in histories:
+            y_coords.extend(np.power(10,history.get('log_R')))
+    else:
+        for history in histories:
+            y_coords.extend(history.get('star_mass'))
 
-   print "Constructing mixing regions"
-   mesa_mix_zones = 0
-   while True:
-       try:
-           mesa_mix_zones = mesa_mix_zones + 1
-           mix_type = []
-           mix_top = []
-           for history in histories:
-               mix_type.extend(history.get('mix_type_'+str(mesa_mix_zones)))
-               if kipp_args.yaxis == "radius":
-                    mix_top.extend(history.get('mix_relr_top_'+str(mesa_mix_zones)))
-               else:
-                    mix_top.extend(history.get('mix_qtop_'+str(mesa_mix_zones)))
-           mix_data.append([mix_type, mix_top])
-       except Exception, e:
-           #reached all mix zones included
-           mesa_mix_zones = mesa_mix_zones - 1
-           break
+    print "Constructing mixing regions"
+    mesa_mix_zones = 0
+    while True:
+        try:
+            mesa_mix_zones = mesa_mix_zones + 1
+            mix_type = []
+            mix_top = []
+            for history in histories:
+                mix_type.extend(history.get('mix_type_'+str(mesa_mix_zones)))
+                if kipp_args.yaxis == "radius":
+                     mix_top.extend(history.get('mix_relr_top_'+str(mesa_mix_zones)))
+                else:
+                     mix_top.extend(history.get('mix_qtop_'+str(mesa_mix_zones)))
+            mix_data.append([mix_type, mix_top])
+        except Exception, e:
+            #reached all mix zones included
+            mesa_mix_zones = mesa_mix_zones - 1
+            print "there are " + str(mesa_mix_zones) + " mixing zones"
+            break
 
-   if kipp_args.yaxis == "radius":
-       tolerance = kipp_args.radius_tolerance
-   else:
-       tolerance = kipp_args.mass_tolerance
+    if kipp_args.yaxis == "radius":
+        tolerance = kipp_args.radius_tolerance
+    else:
+        tolerance = kipp_args.mass_tolerance
 
-   zones = []
-   mix_types = []
-   open_zones = []
-   new_zones = []
-   for i in range(1,len(x_coords)):
-       current_x = x_coords[i]
-       if current_x > max_x_coord:
-           break
-       if current_x < min_x_coord:
-           continue
-       previous_x = x_coords[i-1]
-       for j in range(0,mesa_mix_zones):
-           mix_type = mix_data[j][0][i]
-           if mix_type == 0 or mix_type == -1:
-               continue 
-           max_y_coord = mix_data[j][1][i]*y_coords[i]
-           min_y_coord = 0
-           if j > 0:
-               min_y_coord = mix_data[j-1][1][i]*y_coords[i]
-           #ignore too small regions
-           if max_y_coord - min_y_coord < tolerance*y_coords[i]:
-               continue
-           zone_block = Zone_Block(previous_x, current_x, min_y_coord, max_y_coord)
-           exists = False
-           zones_to_merge = []
-           for z in open_zones:
-               if z.extend(zone_block.vertices[1], zone_block.vertices[1].prev_vertex, mix_type):
-                   exists = True
-                   z.new_blocks.append(zone_block)
-                   zones_to_merge.append(z)
-           #merge zones as needed
-           for k in range(1,len(zones_to_merge)):
-               zones_to_merge[0].merge_zone(zones_to_merge[k])
-               open_zones.remove(zones_to_merge[k])
-           #create zone if it has no predecesor
-           if not exists:
-               z = Zone(zone_block, mix_type)
-               new_zones.append(z)
-       open_zones.extend(new_zones)
-       new_zones = []
-       #separate zones which didn't continue here so we don't need to check them all the time
-       for z in open_zones:
-           z.switch_new_blocks()
-       for z in open_zones:
-           if len(z.last_blocks) == 0:
-               zones.append(z.get_path())
-               mix_types.append(z.mix_type)
-               open_zones.remove(z)
+    zones = []
+    mix_types = []
+    open_zones = []
+    new_zones = []
+    for i in range(1,len(x_coords)):
+        current_x = x_coords[i]
+        if current_x > xlims[1]:
+            break
+        if current_x < xlims[0]:
+            continue
+        previous_x = x_coords[i-1]
+        for j in range(0,mesa_mix_zones):
+            mix_type = mix_data[j][0][i]
+            if mix_type == 0 or mix_type == -1:
+                continue 
+            max_y_coord = mix_data[j][1][i]*y_coords[i]
+            min_y_coord = 0
+            if j > 0:
+                min_y_coord = mix_data[j-1][1][i]*y_coords[i]
+            #ignore too small regions
+            if max_y_coord - min_y_coord < tolerance*y_coords[i]:
+                continue
+            zone_block = Zone_Block(previous_x, current_x, min_y_coord, max_y_coord)
+            exists = False
+            zones_to_merge = []
+            for z in open_zones:
+                if z.extend(zone_block.vertices[1], zone_block.vertices[1].prev_vertex, mix_type):
+                    exists = True
+                    z.new_blocks.append(zone_block)
+                    zones_to_merge.append(z)
+            #merge zones as needed
+            for k in range(1,len(zones_to_merge)):
+                zones_to_merge[0].merge_zone(zones_to_merge[k])
+                open_zones.remove(zones_to_merge[k])
+            #create zone if it has no predecesor
+            if not exists:
+                z = Zone(zone_block, mix_type)
+                new_zones.append(z)
+        open_zones.extend(new_zones)
+        new_zones = []
+        #separate zones which didn't continue here so we don't need to check them all the time
+        for z in open_zones:
+            z.switch_new_blocks()
+        for z in open_zones:
+            if len(z.last_blocks) == 0:
+                zones.append(z.get_path())
+                mix_types.append(z.mix_type)
+                open_zones.remove(z)
 
-   for z in open_zones:
-       z.switch_new_blocks()
-       zones.append(z.get_path())
-       mix_types.append(z.mix_type)
+    for z in open_zones:
+        z.switch_new_blocks()
+        zones.append(z.get_path())
+        mix_types.append(z.mix_type)
 
-   return zones, mix_types, x_coords, y_coords, histories
+    Mixing_Zones = namedtuple('Mixing_Zones', 'zones mix_types x_coords y_coords histories')
+    return Mixing_Zones(zones, mix_types, x_coords, y_coords, histories)
 
 def get_xyz_data(profile_names, xaxis_divide, kipp_args):
     # Extract data from profiles
-    max_x_coord = -1
+    max_x_coord = -1e99
     min_x_coord = 1e99
     #first read all headers to determine max value on yaxis
     max_y = 0
@@ -278,11 +283,12 @@ def get_xyz_data(profile_names, xaxis_divide, kipp_args):
         z_data = kipp_args.extractor(kipp_args.identifier, kipp_args.log10_on_data, prof)
         z_data = z_data[::-1]
         interp_z_data = np.interp(y_interp, y_data, z_data)
-        #set nans outside of range so there is no plotting
+        #set nans outside of range so there is no plotting (did not work, just plot a white region to cover things)
         #for j in range(kipp_args.yresolution):
         #    if (Y_data_array[j,i] > prof_y):
         #        Z_data_array[j,i] = np.nan
         #    else:
         Z_data_array[:,i] = interp_z_data
 
-    return min_x_coord, max_x_coord, X_data_array, Y_data_array, Z_data_array
+    XYZ_Data = namedtuple('XYZ_Data', 'xlims X Y Z')
+    return XYZ_Data((min_x_coord, max_x_coord), X_data_array, Y_data_array, Z_data_array)

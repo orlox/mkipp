@@ -1,8 +1,9 @@
 import numpy as np
+import numpy.ma as ma
 
 #class to extract a mesa data file.
 class Mesa_Data:
-    def __init__(self, history_file, only_read_header = False, read_data = True, read_data_cols = []):
+    def __init__(self, history_file, only_read_header = False, read_data = True, read_data_cols = [], clean_data = True):
         self.filename = history_file
         #header is a dictionary with the general info from the second and third line of file
         self.header = {}
@@ -33,16 +34,43 @@ class Mesa_Data:
 
         if len(read_data_cols) == 0:
             read_data_cols = self.columns.keys()
-        self.read_data(self.columns.keys())
+        self.read_data(read_data_cols, clean_data = clean_data)
 
-    def read_data(self, column_names):
-        #read data, TODO: ignore inexistant columns
+
+    def read_data(self, column_names, clean_data = True):
+        #always include model_number if its part of the data
+        if "model_number" not in column_names and "model_number" in self.columns:
+            column_names.append("model_number")
+
+        #read data
         data = np.loadtxt(self.filename, skiprows = 6, \
-            usecols = ([self.columns[k] for k in column_names]), unpack = True)
+            usecols = tuple([self.columns[k] for k in column_names]), unpack = True)
 
         self.data = {}
-        for i, column in enumerate(column_names):
-            self.data[column] = data[i]
+        #Be careful in case only one column is required
+        if len(data.shape) > 1:
+            for i, column in enumerate(column_names):
+                self.data[column] = data[i]
+        else:
+            self.data[column_names[0]] = data
+
+        #clean redos
+        if clean_data and "model_number" in self.columns and len(self.data["model_number"]) > 1:
+            #create a mask
+            model_number = self.data["model_number"]
+            mask = np.zeros(len(model_number))
+            max_model_number = model_number[-1]
+            #last entry is valid, start from there and remove repeats
+            for i in range(len(model_number)-2,-1,-1):
+                if model_number[i] >= max_model_number:
+                    mask[i] = 1
+                else:
+                    max_model_number = model_number[i]
+
+            if sum(mask) > 0:
+                for column in column_names:
+                    self.data[column] = ma.masked_array(self.data[column], mask=mask).compressed()
+
 
     def get(self,key):
         return self.data[key]

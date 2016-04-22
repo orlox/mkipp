@@ -5,8 +5,6 @@ Kippenhahn plotter for MESA. BEWARE: this README might be out of date! In case t
 
 IMPORTANT!! your history_columns.list needs to have mixing_regions and mix_relr_regions specified for MESA to output the neccesary data of the mixing regions in terms of mass and radius respectively.
 
-ALSO IMPORTANT!! mesa_data.py deals with reading mesa output files but does not clean history files in case of restarts. So plotting models with restars should be a bit messy right now.
-
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 The Kippenhahn plotter consists of 3 files:
@@ -30,6 +28,8 @@ class Kipp_Args:
             logs_dirs = ['LOGS'],
             profile_names = [],
             history_names = [],
+            clean_data = True,
+            extra_history_cols = [],
             identifier = "eps_nuc",
             extractor = default_extractor,
             log10_on_data = True,
@@ -52,13 +52,18 @@ class Kipp_Args:
             save_file = True,
             save_filename = "Kippenhahn.png"):
         """Initializes properties for a Kippenhahn plot
+
         Note:
             All arguments are optional, if not provided defaults are assigned
+
         Args:
             logs_dir (List[str]): List of paths to MESA LOGS directories. If profile_names and
                 history_names are not provided, they are automatically generated from logs_dir.
             profile_names (List[str]): List of paths to MESA profile files.
             history_names (List[str]): List of paths to MESA history files.
+            clean_data (bool): Clean history files in case of redos. If data has no redos,
+                a small performance gain can be had by setting this to False.
+            extra_history_cols (List[str]): Additional column names to be extracted from history files.
             identifier (str): String used as identifier of data to plot. If not using any custom
                 extractors this is simply the column name in the profile file that will be extracted.
                 Default uses eps_nuc.
@@ -89,6 +94,7 @@ class Kipp_Args:
             show_plot (bool): If True, pyplot.show() is ran at the end
             save_file (bool): If True, plot is saved after pyplot.show()
             save_filename (str): Filename to save plot. Extension determines filetype.
+
         """
 ```
 
@@ -100,7 +106,13 @@ import numpy as np
 #plot of Helium abundance against time, independent decoration
 fig = plt.figure()
 axis = plt.gca()
-contour_plot, histories, xlims = mkipp.kipp_plot(mkipp.Kipp_Args(
+#mkipp.kipp_plot returns an object containing
+#   kipp_plot.contour_plot : the return value of matplotlibs contourf. Can be
+#                            used to create a colorbar with plt.colorbar() 
+#   kipp_plot.histories    : list of history files read. data can be accesed from this
+#                            using the get("column_name") function
+#   kipp_plot.xlims        : limits of data in x coordinate
+kipp_plot = mkipp.kipp_plot(mkipp.Kipp_Args(
         xaxis = "star_age",
         time_units = "Myr",
         identifier = "y",
@@ -108,7 +120,7 @@ contour_plot, histories, xlims = mkipp.kipp_plot(mkipp.Kipp_Args(
         levels = np.arange(0.0,1.001,0.01),
         decorate_plot = False,
         save_file = False), axis = axis)
-bar = plt.colorbar(contour_plot,pad=0.05)
+bar = plt.colorbar(kipp_plot.contour_plot,pad=0.05)
 bar.set_label("Helium abundance")
 axis.set_xlabel("Time (Myr)")
 axis.set_ylabel("Mass (solar masses)")
@@ -134,33 +146,45 @@ profile_names = ["LOGS/profile"+str(int(i))+".data" \
 #if data is distributed among several history.data files, you can provide them
 history_names = ["LOGS/history.data"]
 #read profile data
-min_x_coord, max_x_coord, X, Y, Z = \
-        kipp_data.get_xyz_data(profile_names, kipp_args.xaxis_divide, kipp_args)
+#kipp_data.get_xyz_data returns an object containing
+#   xyz_data.xlims : limits of data in x coordinate
+#   xyz_data.X     : 2D array of xaxis values of profile data
+#   xyz_data.Y     : 2D array of xaxis values of profile data
+#   xyz_data.Z     : 2D array of xaxis values of profile data
+# the last three can be used as inputs for matplotlib contour or contourf
+xyz_data = kipp_data.get_xyz_data(profile_names, kipp_args.xaxis_divide, kipp_args)
 #read mixing regions 
-zones, mix_types, x_coords, y_coords, histories = kipp_data.get_mixing_zones(\
-        history_names, kipp_args.xaxis_divide, min_x_coord, max_x_coord, kipp_args)
+#kipp_data.get_mixing_zones returns an object containing
+#   mixing_zones.zones     : matplotlib Path objects for each mixing zone.
+#                            These can be plotted using add_patch(...)
+#   mixing_zones.mix_types : Integer array containing the type of each zone
+#   mixing_zones.x_coords  : x coordinates for points at the surface
+#   mixing_zones.y_coords  : y coordinates for points at the surface
+#   mixing_zones.histories : mesa_data history files to access additional data
+# the last three can be used as inputs for matplotlib contour or contourf
+mixing_zones = kipp_data.get_mixing_zones(history_names, kipp_args.xaxis_divide, xyz_data.xlims, kipp_args)
 # just plot convection, overshooting and semiconvection
-for i,zone in enumerate(zones):
+for i,zone in enumerate(mixing_zones.zones):
     color = ""
     #Convective mixing
-    if mix_types[i] == 1: #convection
+    if mixing_zones.mix_types[i] == 1: #convection
         color = '#332288'
     #Overshooting 
-    elif mix_types[i] == 3: #overshooting
+    elif mixing_zones.mix_types[i] == 3: #overshooting
         color = '#117733'
     #Semiconvective mixing
-    elif mix_types[i] == 4: #semiconvection
+    elif mixing_zones.mix_types[i] == 4: #semiconvection
         color = '#CC6677'
     else:
         continue
     axis.add_patch(PathPatch(zone, color=color, alpha = 0.5, lw = 0))
-CS = plt.contour(X, Y, Z, [0,4,8], colors='k')
+CS = plt.contour(xyz_data.X, xyz_data.Y, xyz_data.Z, [0,4,8], colors='k')
 plt.clabel(CS, inline=1, fontsize=10)
-axis.plot(x_coords,y_coords,'k',lw=4)
+axis.plot(mixing_zones.x_coords, mixing_zones.y_coords, 'k', lw=4)
 axis.set_xlabel("model_number")
 axis.set_ylabel("Mass (solar masses)")
-axis.set_xlim(0,max(x_coords))
-axis.set_ylim(0,max(y_coords))
+axis.set_xlim(0,max(mixing_zones.x_coords))
+axis.set_ylim(0,max(mixing_zones.y_coords))
 plt.savefig("Kippenhahn3.png")
 ```
 which gives the following ugly result (just an example!)

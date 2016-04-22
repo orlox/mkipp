@@ -22,6 +22,7 @@ import numpy as np
 from math import log10, pi
 from mesa_data import *
 from kipp_data import *
+from collections import namedtuple
 
 #matplotlib specifics
 import matplotlib.pyplot as plt
@@ -53,6 +54,8 @@ class Kipp_Args:
             logs_dirs = ['LOGS'],
             profile_names = [],
             history_names = [],
+            clean_data = True,
+            extra_history_cols = [],
             identifier = "eps_nuc",
             extractor = default_extractor,
             log10_on_data = True,
@@ -84,6 +87,9 @@ class Kipp_Args:
                 history_names are not provided, they are automatically generated from logs_dir.
             profile_names (List[str]): List of paths to MESA profile files.
             history_names (List[str]): List of paths to MESA history files.
+            clean_data (bool): Clean history files in case of redos. If data has no redos,
+                a small performance gain can be had by setting this to False.
+            extra_history_cols (List[str]): Additional column names to be extracted from history files.
             identifier (str): String used as identifier of data to plot. If not using any custom
                 extractors this is simply the column name in the profile file that will be extracted.
                 Default uses eps_nuc.
@@ -120,6 +126,8 @@ class Kipp_Args:
         self.logs_dirs = logs_dirs
         self.profile_names = profile_names
         self.history_names = history_names
+        self.clean_data = clean_data
+        self.extra_history_cols = extra_history_cols
         self.identifier = identifier
         self.extractor = extractor
         self.log10_on_data = log10_on_data
@@ -176,50 +184,50 @@ def kipp_plot(kipp_args, axis=None):
         elif kipp_args.time_units == "Gyr":
             xaxis_divide = 1e9
 
-    min_x_coord, max_x_coord, X_data_array, Y_data_array, Z_data_array = \
-            get_xyz_data(profile_names, xaxis_divide, kipp_args)
+    xyz_data = get_xyz_data(profile_names, xaxis_divide, kipp_args)
 
     #Get levels if undefined
     levels = kipp_args.levels
     if len(levels) == 0:
         if kipp_args.log_levels:
-            levels = get_levels_log(np.nanmin(Z_data_array[:,:]), np.nanmax(Z_data_array[:,:]), \
+            levels = get_levels_log(np.nanmin(xyz_data.Z[:,:]), np.nanmax(xyz_data.Z[:,:]), \
                     kipp_args.num_levels)
         else:
-            levels = get_levels_linear(np.nanmin(Z_data_array[:,:]), np.nanmax(Z_data_array[:,:]), \
+            levels = get_levels_linear(np.nanmin(xyz_data.Z[:,:]), np.nanmax(xyz_data.Z[:,:]), \
                     kipp_args.num_levels)
     #make plot
-    contour_plot = axis.contourf(X_data_array, Y_data_array, Z_data_array[:,:], \
+    contour_plot = axis.contourf(xyz_data.X, xyz_data.Y, xyz_data.Z[:,:], \
                 cmap=kipp_args.contour_colormap, levels=levels, antialiased = False)
 
-    zones, mix_types, x_coords, y_coords, histories = get_mixing_zones(\
-            history_names, xaxis_divide, min_x_coord, max_x_coord, kipp_args)
+    #zones, mix_types, x_coords, y_coords, histories = get_mixing_zones(\
+    #        history_names, xaxis_divide, xyz_data.xlims, kipp_args)
+    mixing_zones = get_mixing_zones(history_names, xaxis_divide, xyz_data.xlims, kipp_args)
 
 
-    for i,zone in enumerate(zones):
+    for i,zone in enumerate(mixing_zones.zones):
         color = ""
         #Convective mixing
-        if mix_types[i] == 1 and kipp_args.show_conv:
+        if mixing_zones.mix_types[i] == 1 and kipp_args.show_conv:
             color = "Chartreuse"
             hatch = "//"
             line  = 1
         #Overshooting 
-        elif mix_types[i] == 3 and kipp_args.show_over:
+        elif mixing_zones.mix_types[i] == 3 and kipp_args.show_over:
             color = "purple"
             hatch = "x"
             line  = 1
         #Semiconvective mixing
-        elif mix_types[i] == 4 and kipp_args.show_semi:
+        elif mixing_zones.mix_types[i] == 4 and kipp_args.show_semi:
             color = "red"
             hatch = "\\\\"
             line  = 1
         #Thermohaline mixing
-        elif mix_types[i] == 5 and kipp_args.show_therm:
+        elif mixing_zones.mix_types[i] == 5 and kipp_args.show_therm:
             color = "Gold" #Salmon
             hatch = "||"
             line  = 1
         #Rotational mixing
-        elif mix_types[i] == 6 and kipp_args.show_rot:
+        elif mixing_zones.mix_types[i] == 6 and kipp_args.show_rot:
             color = "brown"
             hatch = "*"
             line  = 1
@@ -231,11 +239,12 @@ def kipp_plot(kipp_args, axis=None):
         axis.add_patch(PathPatch(zone, fill=False, hatch = hatch, edgecolor=color, linewidth=line))
 
     #limit x_coords to data of contours and add line at stellar surface
-    for i, x_coord in enumerate(x_coords):
-        if x_coord > max_x_coord:
+    for i, x_coord in enumerate(mixing_zones.x_coords):
+        if x_coord > xyz_data.xlims[1]:
             break
-    axis.fill_between(x_coords, max(y_coords), y_coords, color = "w")
-    axis.plot(x_coords[:i], y_coords[:i], "k-")
+    #I also fill with white above the plot to cover any remainer of the contour plot
+    axis.fill_between(mixing_zones.x_coords, max(mixing_zones.y_coords), mixing_zones.y_coords, color = "w")
+    axis.plot(mixing_zones.x_coords[:i], mixing_zones.y_coords[:i], "k-")
     #add core masses
     if kipp_args.yaxis == "mass":
         for core_mass in kipp_args.core_masses:
@@ -248,7 +257,7 @@ def kipp_plot(kipp_args, axis=None):
             elif core_mass == "O":
                 field_name = "o_core_mass"
                 color = "g:"
-            for history in histories:
+            for history in mixing_zones.histories:
                 axis.plot(history.get(kipp_args.xaxis) / xaxis_divide, history.get(field_name), color)
 
     if kipp_args.decorate_plot:
@@ -277,5 +286,7 @@ def kipp_plot(kipp_args, axis=None):
     if kipp_args.save_file:
         plt.savefig(kipp_args.save_filename)
 
-    return contour_plot, histories, [min_x_coord, max_x_coord]
+    Kipp_Plot = namedtuple('Kipp_Plot', 'contour_plot histories xlims')
+
+    return Kipp_Plot(contour_plot, mixing_zones.histories, xyz_data.xlims)
 
