@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import mkipp
 import kipp_data
+import mesa_data
 import matplotlib.pyplot as plt
 from matplotlib.patches import PathPatch
 import numpy as np
@@ -35,10 +36,9 @@ plt.savefig("Kippenhahn2.png")
 kipp_args = mkipp.Kipp_Args()
 fig = plt.figure()
 axis = plt.gca()
-profile_names = ["LOGS/profile"+str(int(i))+".data" \
-        for i in np.loadtxt("LOGS/profiles.index", skiprows = 1, usecols = (2,))]
+profile_paths = mesa_data.get_profile_paths(["LOGS"])
 #if data is distributed among several history.data files, you can provide them
-history_names = ["LOGS/history.data"]
+history_paths = ["LOGS/history.data"]
 #read profile data
 #kipp_data.get_xyz_data returns an object containing
 #   xyz_data.xlims : limits of data in x coordinate
@@ -46,7 +46,7 @@ history_names = ["LOGS/history.data"]
 #   xyz_data.Y     : 2D array of xaxis values of profile data
 #   xyz_data.Z     : 2D array of xaxis values of profile data
 # the last three can be used as inputs for matplotlib contour or contourf
-xyz_data = kipp_data.get_xyz_data(profile_names, kipp_args.xaxis_divide, kipp_args)
+xyz_data = kipp_data.get_xyz_data(profile_paths, kipp_args.xaxis_divide, kipp_args)
 #read mixing regions 
 #kipp_data.get_mixing_zones returns an object containing
 #   mixing_zones.zones     : matplotlib Path objects for each mixing zone.
@@ -56,7 +56,7 @@ xyz_data = kipp_data.get_xyz_data(profile_names, kipp_args.xaxis_divide, kipp_ar
 #   mixing_zones.y_coords  : y coordinates for points at the surface
 #   mixing_zones.histories : mesa_data history files to access additional data
 # the last three can be used as inputs for matplotlib contour or contourf
-mixing_zones = kipp_data.get_mixing_zones(history_names, kipp_args.xaxis_divide, xyz_data.xlims, kipp_args)
+mixing_zones = kipp_data.get_mixing_zones(history_paths, kipp_args.xaxis_divide, xyz_data.xlims, kipp_args)
 # just plot convection, overshooting and semiconvection
 for i,zone in enumerate(mixing_zones.zones):
     color = ""

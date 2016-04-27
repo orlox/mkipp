@@ -26,8 +26,8 @@ Several options can be passed to mkipp.Kipp_Args():
 class Kipp_Args:
     def __init__(self,
             logs_dirs = ['LOGS'],
-            profile_names = [],
-            history_names = [],
+            profile_paths = [],
+            history_paths = [],
             clean_data = True,
             extra_history_cols = [],
             identifier = "eps_nuc",
@@ -57,10 +57,10 @@ class Kipp_Args:
             All arguments are optional, if not provided defaults are assigned
 
         Args:
-            logs_dir (List[str]): List of paths to MESA LOGS directories. If profile_names and
-                history_names are not provided, they are automatically generated from logs_dir.
-            profile_names (List[str]): List of paths to MESA profile files.
-            history_names (List[str]): List of paths to MESA history files.
+            logs_dir (List[str]): List of paths to MESA LOGS directories. If profile_paths and
+                history_paths are not provided, they are automatically generated from logs_dir.
+            profile_paths (List[str]): List of paths to MESA profile files.
+            history_paths (List[str]): List of paths to MESA history files.
             clean_data (bool): Clean history files in case of redos. If data has no redos,
                 a small performance gain can be had by setting this to False.
             extra_history_cols (List[str]): Additional column names to be extracted from history files.
@@ -134,6 +134,7 @@ The data from mixing regions and profiles can be extracted using lower level fun
 ```python
 import mkipp
 import kipp_data
+import mesa_data
 import matplotlib.pyplot as plt
 from matplotlib.patches import PathPatch
 import numpy as np
@@ -141,10 +142,9 @@ import numpy as np
 kipp_args = mkipp.Kipp_Args()
 fig = plt.figure()
 axis = plt.gca()
-profile_names = ["LOGS/profile"+str(int(i))+".data" \
-        for i in np.loadtxt("LOGS/profiles.index", skiprows = 1, usecols = (2,))]
+profile_paths = mesa_data.get_profile_paths(["LOGS"])
 #if data is distributed among several history.data files, you can provide them
-history_names = ["LOGS/history.data"]
+history_paths = ["LOGS/history.data"]
 #read profile data
 #kipp_data.get_xyz_data returns an object containing
 #   xyz_data.xlims : limits of data in x coordinate
@@ -152,7 +152,7 @@ history_names = ["LOGS/history.data"]
 #   xyz_data.Y     : 2D array of xaxis values of profile data
 #   xyz_data.Z     : 2D array of xaxis values of profile data
 # the last three can be used as inputs for matplotlib contour or contourf
-xyz_data = kipp_data.get_xyz_data(profile_names, kipp_args.xaxis_divide, kipp_args)
+xyz_data = kipp_data.get_xyz_data(profile_paths, kipp_args.xaxis_divide, kipp_args)
 #read mixing regions 
 #kipp_data.get_mixing_zones returns an object containing
 #   mixing_zones.zones     : matplotlib Path objects for each mixing zone.
@@ -162,7 +162,7 @@ xyz_data = kipp_data.get_xyz_data(profile_names, kipp_args.xaxis_divide, kipp_ar
 #   mixing_zones.y_coords  : y coordinates for points at the surface
 #   mixing_zones.histories : mesa_data history files to access additional data
 # the last three can be used as inputs for matplotlib contour or contourf
-mixing_zones = kipp_data.get_mixing_zones(history_names, kipp_args.xaxis_divide, xyz_data.xlims, kipp_args)
+mixing_zones = kipp_data.get_mixing_zones(history_paths, kipp_args.xaxis_divide, xyz_data.xlims, kipp_args)
 # just plot convection, overshooting and semiconvection
 for i,zone in enumerate(mixing_zones.zones):
     color = ""

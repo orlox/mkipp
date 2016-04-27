@@ -71,6 +71,26 @@ class Mesa_Data:
                 for column in column_names:
                     self.data[column] = ma.masked_array(self.data[column], mask=mask).compressed()
 
-
     def get(self,key):
         return self.data[key]
+
+#reads the profiles.index files in the folders specified by the logs_dirs array and returns
+#an array containing paths to the individual profile files, after cleaning up redos and backups
+def get_profile_paths(logs_dirs = ["LOGS"]):
+    profile_paths = []
+    for log_dir in logs_dirs:
+        model_number, paths = np.loadtxt(log_dir+"/profiles.index", skiprows = 1, usecols = (0,2), unpack = True)
+        mask = np.zeros(len(paths))
+        max_model_number = model_number[-1]
+        #last entry is valid, start from there and remove repeats
+        for i in range(len(model_number)-2,-1,-1):
+            if model_number[i] >= max_model_number:
+                mask[i] = 1
+            else:
+                max_model_number = model_number[i]
+
+        if sum(mask) > 0:
+            paths = ma.masked_array(paths, mask=mask).compressed()
+        profile_paths.extend([log_dir+"/profile"+str(int(i))+".data" for i in paths])
+    return profile_paths
+

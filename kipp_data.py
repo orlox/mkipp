@@ -102,12 +102,12 @@ class Zone:
         self.new_blocks.extend(zone2.new_blocks)
 
 #returns a list of matplotlib path objects with the mixing regions
-def get_mixing_zones(history_names, xaxis_divide, xlims, kipp_args):
+def get_mixing_zones(history_paths, xaxis_divide, xlims, kipp_args):
     # Get mixing zones and mass borders from history.data files
     print "Reading history data"
     mix_data = []
     histories = []
-    for history_name in history_names:
+    for history_name in history_paths:
         history = Mesa_Data(history_name, read_data = False)
         columns = []
         for key in history.columns.keys():
@@ -217,7 +217,7 @@ def get_mixing_zones(history_names, xaxis_divide, xlims, kipp_args):
     Mixing_Zones = namedtuple('Mixing_Zones', 'zones mix_types x_coords y_coords histories')
     return Mixing_Zones(zones, mix_types, x_coords, y_coords, histories)
 
-def get_xyz_data(profile_names, xaxis_divide, kipp_args):
+def get_xyz_data(profile_paths, xaxis_divide, kipp_args):
     # Extract data from profiles
     max_x_coord = -1e99
     min_x_coord = 1e99
@@ -227,7 +227,7 @@ def get_xyz_data(profile_names, xaxis_divide, kipp_args):
     if kipp_args.yaxis_normalize:
         max_y = star_mass = star_radius = 1.0
     else:
-        for i,profile_name in enumerate(profile_names):
+        for i,profile_name in enumerate(profile_paths):
             try:
                 prof = Mesa_Data(profile_name, only_read_header = True)
                 if kipp_args.yaxis == "mass":
@@ -248,13 +248,13 @@ def get_xyz_data(profile_names, xaxis_divide, kipp_args):
     columns.extend(kipp_args.extractor(\
             kipp_args.identifier, kipp_args.log10_on_data, prof, return_data_columns = True))
     # Initialize interpolation grid
-    Z_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
+    Z_data_array = np.zeros((kipp_args.yresolution,len(profile_paths)))
     # XY coordinates for data
-    X_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
-    Y_data_array = np.zeros((kipp_args.yresolution,len(profile_names)))
+    X_data_array = np.zeros((kipp_args.yresolution,len(profile_paths)))
+    Y_data_array = np.zeros((kipp_args.yresolution,len(profile_paths)))
     for j in range(kipp_args.yresolution):
         Y_data_array[j,:] = max_y * j / (kipp_args.yresolution-1)
-    for i,profile_name in enumerate(profile_names):
+    for i,profile_name in enumerate(profile_paths):
         try:
             prof = Mesa_Data(profile_name, read_data = False)
             prof.read_data(columns)

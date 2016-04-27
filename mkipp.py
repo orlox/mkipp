@@ -52,8 +52,8 @@ def default_extractor(identifier, log10_on_data, prof, return_data_columns = Fal
 class Kipp_Args:
     def __init__(self,
             logs_dirs = ['LOGS'],
-            profile_names = [],
-            history_names = [],
+            profile_paths = [],
+            history_paths = [],
             clean_data = True,
             extra_history_cols = [],
             identifier = "eps_nuc",
@@ -83,10 +83,10 @@ class Kipp_Args:
             All arguments are optional, if not provided defaults are assigned
 
         Args:
-            logs_dir (List[str]): List of paths to MESA LOGS directories. If profile_names and
-                history_names are not provided, they are automatically generated from logs_dir.
-            profile_names (List[str]): List of paths to MESA profile files.
-            history_names (List[str]): List of paths to MESA history files.
+            logs_dir (List[str]): List of paths to MESA LOGS directories. If profile_paths and
+                history_paths are not provided, they are automatically generated from logs_dir.
+            profile_paths (List[str]): List of paths to MESA profile files.
+            history_paths (List[str]): List of paths to MESA history files.
             clean_data (bool): Clean history files in case of redos. If data has no redos,
                 a small performance gain can be had by setting this to False.
             extra_history_cols (List[str]): Additional column names to be extracted from history files.
@@ -124,8 +124,8 @@ class Kipp_Args:
         """
 
         self.logs_dirs = logs_dirs
-        self.profile_names = profile_names
-        self.history_names = history_names
+        self.profile_paths = profile_paths
+        self.history_paths = history_paths
         self.clean_data = clean_data
         self.extra_history_cols = extra_history_cols
         self.identifier = identifier
@@ -163,17 +163,14 @@ def kipp_plot(kipp_args, axis=None):
         axis = fig.gca()
 
     #Fill profile and history names if unspecified
-    profile_names = kipp_args.profile_names
-    if len(profile_names) == 0:
-        profile_names = []
+    profile_paths = kipp_args.profile_paths
+    if len(profile_paths) == 0:
+        profile_paths = get_profile_paths(logs_dirs = kipp_args.logs_dirs)
+    history_paths = kipp_args.history_paths
+    if len(history_paths) == 0:
+        history_paths = []
         for log_dir in kipp_args.logs_dirs:
-            profile_names.extend(\
-                    [log_dir+"/profile"+str(int(i))+".data" for i in np.loadtxt(log_dir+"/profiles.index", skiprows = 1, usecols = (2,))])
-    history_names = kipp_args.history_names
-    if len(history_names) == 0:
-        history_names = []
-        for log_dir in kipp_args.logs_dirs:
-            history_names.append(log_dir+"/history.data")
+            history_paths.append(log_dir+"/history.data")
 
     xaxis_divide = kipp_args.xaxis_divide
     if kipp_args.xaxis == "star_age":
@@ -184,7 +181,7 @@ def kipp_plot(kipp_args, axis=None):
         elif kipp_args.time_units == "Gyr":
             xaxis_divide = 1e9
 
-    xyz_data = get_xyz_data(profile_names, xaxis_divide, kipp_args)
+    xyz_data = get_xyz_data(profile_paths, xaxis_divide, kipp_args)
 
     #Get levels if undefined
     levels = kipp_args.levels
@@ -200,8 +197,8 @@ def kipp_plot(kipp_args, axis=None):
                 cmap=kipp_args.contour_colormap, levels=levels, antialiased = False)
 
     #zones, mix_types, x_coords, y_coords, histories = get_mixing_zones(\
-    #        history_names, xaxis_divide, xyz_data.xlims, kipp_args)
-    mixing_zones = get_mixing_zones(history_names, xaxis_divide, xyz_data.xlims, kipp_args)
+    #        history_paths, xaxis_divide, xyz_data.xlims, kipp_args)
+    mixing_zones = get_mixing_zones(history_paths, xaxis_divide, xyz_data.xlims, kipp_args)
 
 
     for i,zone in enumerate(mixing_zones.zones):
