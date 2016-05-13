@@ -66,6 +66,7 @@ class Kipp_Args:
             xaxis = "model_number",
             xaxis_divide = 1.0,
             time_units = "Myr",
+            function_on_xaxis = lambda x: x,
             yaxis = "mass",
             yaxis_normalize = False,
             show_conv = True, show_therm = True, show_semi = True, show_over = True, show_rot = False,
@@ -93,7 +94,8 @@ class Kipp_Args:
             identifier (str): String used as identifier of data to plot. If not using any custom
                 extractors this is simply the column name in the profile file that will be extracted.
                 Default uses eps_nuc.
-            extractor : TODO, explain
+            extractor (function): Custom function to read out profile data. Allows to extract
+                data that is not included by default but can be computed from the given profiles
             log10_on_data (bool): Determines if log10(abs()) is applied to profile data
             contour_colormap (matplotlib.cm): matplotlib color map used to plot contours
             levels (List): List of fixed levels for contour plot (int or float)
@@ -105,6 +107,8 @@ class Kipp_Args:
             xaxis_divide (float): divide xaxis by this value
             time_units (str): When using xaxis = "star_age" this specifies the unit of time
                 and sets the value of xaxis_divide. Options are "yr", "Myr" and "Gyr"
+            function_on_xaxis (function): after dividing by xaxis_divide, this function is applied
+                to all xvalues of the data
             yaxis (str): Quantity plotted in the yaxis. Either "mass" or "radius"
             yaxis_normalize (bool): If True Normalize yaxis at each point using total mass/total radius
             show_conv, show_therm, show_semi, show_over, show_rot (bool): Specifies whether or
@@ -138,6 +142,7 @@ class Kipp_Args:
         self.xaxis = xaxis
         self.xaxis_divide = xaxis_divide
         self.time_units = time_units
+        self.function_on_xaxis = function_on_xaxis
         self.yaxis = yaxis
         self.yaxis_normalize = yaxis_normalize
         self.show_conv = show_conv
@@ -157,7 +162,16 @@ class Kipp_Args:
 
 #kipp_plot: Plots a Kippenhahn diagram into the matplotlib axis given. No decoration
 #           done (i.e. axis labeling or colorbars). Returns
-def kipp_plot(kipp_args, axis=None):
+def kipp_plot(kipp_args, axis=None, xlims = None):
+    xaxis_divide = kipp_args.xaxis_divide
+    if kipp_args.xaxis == "star_age":
+        if kipp_args.time_units == "1000 yr":
+            xaxis_divide = 1000
+        elif kipp_args.time_units == "Myr":
+            xaxis_divide = 1e6
+        elif kipp_args.time_units == "Gyr":
+            xaxis_divide = 1e9
+
     if axis == None:
         fig = plt.figure()
         axis = fig.gca()
@@ -172,33 +186,29 @@ def kipp_plot(kipp_args, axis=None):
         for log_dir in kipp_args.logs_dirs:
             history_paths.append(log_dir+"/history.data")
 
-    xaxis_divide = kipp_args.xaxis_divide
-    if kipp_args.xaxis == "star_age":
-        if kipp_args.time_units == "1000 yr":
-            xaxis_divide = 1000
-        elif kipp_args.time_units == "Myr":
-            xaxis_divide = 1e6
-        elif kipp_args.time_units == "Gyr":
-            xaxis_divide = 1e9
+    xyz_data = get_xyz_data(profile_paths, kipp_args, xlims = xlims)
 
-    xyz_data = get_xyz_data(profile_paths, xaxis_divide, kipp_args)
+    #only plot if there is data
+    if xyz_data.Z.size > 0:
+        #Get levels if undefined
+        levels = kipp_args.levels
+        if len(levels) == 0:
+            if kipp_args.log_levels:
+                levels = get_levels_log(np.nanmin(xyz_data.Z[:,:]), np.nanmax(xyz_data.Z[:,:]), \
+                        kipp_args.num_levels)
+            else:
+                levels = get_levels_linear(np.nanmin(xyz_data.Z[:,:]), np.nanmax(xyz_data.Z[:,:]), \
+                        kipp_args.num_levels)
+        #make plot
+        contour_plot = axis.contourf(xyz_data.X, xyz_data.Y, xyz_data.Z[:,:], \
+                    cmap=kipp_args.contour_colormap, levels=levels, antialiased = False)
+    else:
+        print "No profile data to plot!"
+        contour_plot = axis.contourf([[None,None]], [[None,None]], [[None,None]], \
+                    cmap=kipp_args.contour_colormap, antialiased = False)
 
-    #Get levels if undefined
-    levels = kipp_args.levels
-    if len(levels) == 0:
-        if kipp_args.log_levels:
-            levels = get_levels_log(np.nanmin(xyz_data.Z[:,:]), np.nanmax(xyz_data.Z[:,:]), \
-                    kipp_args.num_levels)
-        else:
-            levels = get_levels_linear(np.nanmin(xyz_data.Z[:,:]), np.nanmax(xyz_data.Z[:,:]), \
-                    kipp_args.num_levels)
-    #make plot
-    contour_plot = axis.contourf(xyz_data.X, xyz_data.Y, xyz_data.Z[:,:], \
-                cmap=kipp_args.contour_colormap, levels=levels, antialiased = False)
 
-    #zones, mix_types, x_coords, y_coords, histories = get_mixing_zones(\
-    #        history_paths, xaxis_divide, xyz_data.xlims, kipp_args)
-    mixing_zones = get_mixing_zones(history_paths, xaxis_divide, xyz_data.xlims, kipp_args)
+    mixing_zones = get_mixing_zones(history_paths, kipp_args, xlims = xyz_data.xlims)
 
 
     for i,zone in enumerate(mixing_zones.zones):
@@ -255,7 +265,8 @@ def kipp_plot(kipp_args, axis=None):
                 field_name = "o_core_mass"
                 color = "g:"
             for history in mixing_zones.histories:
-                axis.plot(history.get(kipp_args.xaxis) / xaxis_divide, history.get(field_name), color)
+                axis.plot(kipp_args.function_on_xaxis(history.get(kipp_args.xaxis) / xaxis_divide), \
+                        history.get(field_name), color)
 
     if kipp_args.decorate_plot:
         #add colorbar
@@ -277,6 +288,9 @@ def kipp_plot(kipp_args, axis=None):
                 axis.set_ylabel(r'$m/M$')
             else:   
                 axis.set_ylabel(r'$m/M_\odot$')
+
+    if xlims != None:
+        axis.set_xlim(xlims)
 
     if kipp_args.show_plot:
         plt.show()

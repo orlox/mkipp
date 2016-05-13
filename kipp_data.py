@@ -3,6 +3,7 @@ from matplotlib.patches import PathPatch
 from mesa_data import *
 import re
 from collections import namedtuple
+import numpy as np
 
 # Someday, if I remember, I might explain how this works
 # Class used to store mixing zones
@@ -102,8 +103,18 @@ class Zone:
         self.new_blocks.extend(zone2.new_blocks)
 
 #returns a list of matplotlib path objects with the mixing regions
-def get_mixing_zones(history_paths, xaxis_divide, xlims, kipp_args):
+def get_mixing_zones(history_paths, kipp_args, xlims = None):
     # Get mixing zones and mass borders from history.data files
+
+    xaxis_divide = kipp_args.xaxis_divide
+    if kipp_args.xaxis == "star_age":
+        if kipp_args.time_units == "1000 yr":
+            xaxis_divide = 1000
+        elif kipp_args.time_units == "Myr":
+            xaxis_divide = 1e6
+        elif kipp_args.time_units == "Gyr":
+            xaxis_divide = 1e9
+
     print "Reading history data"
     mix_data = []
     histories = []
@@ -125,6 +136,7 @@ def get_mixing_zones(history_paths, xaxis_divide, xlims, kipp_args):
     x_coords = []
     for history in histories:
         x_coords.extend(history.get(kipp_args.xaxis) / xaxis_divide)
+    x_coords = kipp_args.function_on_xaxis(np.array(x_coords))
     y_coords = []
     if kipp_args.yaxis_normalize:
         y_coords = [1.0]*len(x_coords)
@@ -166,10 +178,13 @@ def get_mixing_zones(history_paths, xaxis_divide, xlims, kipp_args):
     new_zones = []
     for i in range(1,len(x_coords)):
         current_x = x_coords[i]
-        if current_x > xlims[1]:
-            break
-        if current_x < xlims[0]:
-            continue
+        #ignore points outside of range, but include one outside each boundary
+        #do not assume x_coords is in increasing order
+        if xlims != None:
+            if not xlims[0] <= current_x <= xlims[1]:
+                if not ((i+1 < len(x_coords) and xlims[0] <= x_coords[i+1] <= xlims[1]) \
+                        or (i-1 > 0 and xlims[0] <= x_coords[i-1] <= xlims[1])):
+                    continue
         previous_x = x_coords[i-1]
         for j in range(0,mesa_mix_zones):
             mix_type = mix_data[j][0][i]
@@ -208,6 +223,18 @@ def get_mixing_zones(history_paths, xaxis_divide, xlims, kipp_args):
                 zones.append(z.get_path())
                 mix_types.append(z.mix_type)
                 open_zones.remove(z)
+        #order zones
+        temp_open_zones = []
+        while(len(open_zones)>0):
+            min_y = -1
+            j = -1
+            for i, zone in enumerate(open_zones):
+                for block in zone.last_blocks:
+                    if block.vertices[0].coords[1] < min_y or min_y < 0:
+                        min_y = block.vertices[0].coords[1]
+                        j = i
+            temp_open_zones.append(open_zones.pop(j))
+        open_zones =temp_open_zones
 
     for z in open_zones:
         z.switch_new_blocks()
@@ -217,25 +244,53 @@ def get_mixing_zones(history_paths, xaxis_divide, xlims, kipp_args):
     Mixing_Zones = namedtuple('Mixing_Zones', 'zones mix_types x_coords y_coords histories')
     return Mixing_Zones(zones, mix_types, x_coords, y_coords, histories)
 
-def get_xyz_data(profile_paths, xaxis_divide, kipp_args):
+def get_xyz_data(profile_paths, kipp_args, xlims = None):
+
+    xaxis_divide = kipp_args.xaxis_divide
+    if kipp_args.xaxis == "star_age":
+        if kipp_args.time_units == "1000 yr":
+            xaxis_divide = 1000
+        elif kipp_args.time_units == "Myr":
+            xaxis_divide = 1e6
+        elif kipp_args.time_units == "Gyr":
+            xaxis_divide = 1e9
+
     # Extract data from profiles
-    max_x_coord = -1e99
-    min_x_coord = 1e99
+    max_x_coord = float('-inf')
+    min_x_coord = float('+inf')
     #first read all headers to determine max value on yaxis
     max_y = 0
     print "Reading profile data"
+    #first read headers to determine required range in y coordinate
     if kipp_args.yaxis_normalize:
         max_y = star_mass = star_radius = 1.0
-    else:
-        for i,profile_name in enumerate(profile_paths):
-            try:
-                prof = Mesa_Data(profile_name, only_read_header = True)
+    prof_include = [False]*len(profile_paths)
+    for i,profile_name in enumerate(profile_paths):
+        try:
+            prof = Mesa_Data(profile_name, only_read_header = True)
+            if not kipp_args.yaxis_normalize:
                 if kipp_args.yaxis == "mass":
                     max_y = max(prof.header['star_mass'],max_y)
                 elif kipp_args.yaxis == "radius":
                     max_y = max(prof.header['photosphere_r'],max_y)
-            except Exception as e:
-                print "Couldn't read profile " + profile_name
+            #if given xlims, filter out profiles out of range
+            #add one profile to each side so data is shown at borders
+            if xlims != None:
+                x_coord = kipp_args.function_on_xaxis(prof.header[kipp_args.xaxis] / xaxis_divide)
+                if xlims[0] <= x_coord <= xlims[1]:
+                    prof_include[i] = True
+                    if i > 0:
+                        prof_include[i-1] = True
+                    if i+1 < len(profile_paths):
+                        prof_include[i+1] = True
+            else:
+                prof_include[i] = True
+        except Exception as e:
+            print "Couldn't read profile " + profile_name
+
+    #Filter out profiles. This will also remove profiles that failed to load
+    profile_paths = [pp for (pp, pi) in zip(profile_paths, prof_include) if pi]
+
     #array to interpolate data in the yaxis
     y_interp = np.array([max_y * j / (kipp_args.yresolution-1) for j in range(kipp_args.yresolution)])
     #now read the data
@@ -245,8 +300,10 @@ def get_xyz_data(profile_paths, xaxis_divide, kipp_args):
         columns.append('mass')
     elif kipp_args.yaxis == "radius":
         columns.append('radius')
+    #call to extractor with return_data_columns = True only gives the required profile columns for the plot
+    #actual data is read later with the call to prof.read_data(columns)
     columns.extend(kipp_args.extractor(\
-            kipp_args.identifier, kipp_args.log10_on_data, prof, return_data_columns = True))
+            kipp_args.identifier, kipp_args.log10_on_data, None, return_data_columns = True))
     # Initialize interpolation grid
     Z_data_array = np.zeros((kipp_args.yresolution,len(profile_paths)))
     # XY coordinates for data
@@ -260,9 +317,9 @@ def get_xyz_data(profile_paths, xaxis_divide, kipp_args):
             prof.read_data(columns)
         except Exception as e:
             print "Couldn't read profile " + profile_name
-        x_coord = prof.header[kipp_args.xaxis] / xaxis_divide
+        x_coord = kipp_args.function_on_xaxis(prof.header[kipp_args.xaxis] / xaxis_divide)
         if x_coord < max_x_coord:
-            print "Profiles are not ordered in X coordinate!!!"
+            print "Profiles are not increasing in X coordinate!!!"
         max_x_coord = max(max_x_coord, x_coord)
         min_x_coord = min(min_x_coord, x_coord)
         if kipp_args.yaxis == "mass":
