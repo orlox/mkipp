@@ -203,7 +203,7 @@ def kipp_plot(kipp_args, axis=None, xlims = None):
         contour_plot = axis.contourf(xyz_data.X, xyz_data.Y, xyz_data.Z[:,:], \
                     cmap=kipp_args.contour_colormap, levels=levels, antialiased = False)
     else:
-        print "No profile data to plot!"
+        print("No profile data to plot!")
         contour_plot = axis.contourf([[None,None]], [[None,None]], [[None,None]], \
                     cmap=kipp_args.contour_colormap, antialiased = False)
 

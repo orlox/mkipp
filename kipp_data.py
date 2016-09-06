@@ -115,7 +115,7 @@ def get_mixing_zones(history_paths, kipp_args, xlims = None):
         elif kipp_args.time_units == "Gyr":
             xaxis_divide = 1e9
 
-    print "Reading history data"
+    print("Reading history data")
     mix_data = []
     histories = []
     for history_name in history_paths:
@@ -147,7 +147,7 @@ def get_mixing_zones(history_paths, kipp_args, xlims = None):
         for history in histories:
             y_coords.extend(history.get('star_mass'))
 
-    print "Constructing mixing regions"
+    print("Constructing mixing regions")
     mesa_mix_zones = 0
     while True:
         try:
@@ -161,10 +161,10 @@ def get_mixing_zones(history_paths, kipp_args, xlims = None):
                 else:
                      mix_top.extend(history.get('mix_qtop_'+str(mesa_mix_zones)))
             mix_data.append([mix_type, mix_top])
-        except Exception, e:
+        except (Exception):
             #reached all mix zones included
             mesa_mix_zones = mesa_mix_zones - 1
-            print "there are " + str(mesa_mix_zones) + " mixing zones"
+            print("there are " + str(mesa_mix_zones) + " mixing zones")
             break
 
     if kipp_args.yaxis == "radius":
@@ -260,7 +260,7 @@ def get_xyz_data(profile_paths, kipp_args, xlims = None):
     min_x_coord = float('+inf')
     #first read all headers to determine max value on yaxis
     max_y = 0
-    print "Reading profile data"
+    print("Reading profile data")
     #first read headers to determine required range in y coordinate
     if kipp_args.yaxis_normalize:
         max_y = star_mass = star_radius = 1.0
@@ -286,7 +286,7 @@ def get_xyz_data(profile_paths, kipp_args, xlims = None):
             else:
                 prof_include[i] = True
         except Exception as e:
-            print "Couldn't read profile " + profile_name
+            print("Couldn't read profile " + profile_name)
 
     #Filter out profiles. This will also remove profiles that failed to load
     profile_paths = [pp for (pp, pi) in zip(profile_paths, prof_include) if pi]
@@ -316,10 +316,10 @@ def get_xyz_data(profile_paths, kipp_args, xlims = None):
             prof = Mesa_Data(profile_name, read_data = False)
             prof.read_data(columns)
         except Exception as e:
-            print "Couldn't read profile " + profile_name
+            print("Couldn't read profile " + profile_name)
         x_coord = kipp_args.function_on_xaxis(prof.header[kipp_args.xaxis] / xaxis_divide)
         if x_coord < max_x_coord:
-            print "Profiles are not increasing in X coordinate!!!"
+            print("Profiles are not increasing in X coordinate!!!")
         max_x_coord = max(max_x_coord, x_coord)
         min_x_coord = min(min_x_coord, x_coord)
         if kipp_args.yaxis == "mass":
