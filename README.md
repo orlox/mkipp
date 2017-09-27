@@ -4,6 +4,7 @@ Kippenhahn plotter for MESA. BEWARE: this README might be out of date! In case t
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 IMPORTANT!! your history_columns.list needs to have mixing_regions and mix_relr_regions specified for MESA to output the neccesary data of the mixing regions in terms of mass and radius respectively.
+Also, newer versions of MESA include significantly less output in the profile files, so values such as eps_nuc need to be added to profile_columns.list as well.
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
