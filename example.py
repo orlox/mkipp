@@ -40,7 +40,7 @@ plt.savefig("Kippenhahn3.png")
 fig = plt.figure()
 axis = plt.gca()
 #only need to read star_age column first
-history = mesa_data.Mesa_Data("LOGS/history.data", read_data_cols = ["star_age"])
+history = mesa_data.mesa_data("LOGS/history.data", read_data_cols = ["star_age"])
 max_age = max(history.get("star_age"))
 kipp_plot = mkipp.kipp_plot(mkipp.Kipp_Args(
         xaxis = "star_age",

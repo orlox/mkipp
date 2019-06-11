@@ -119,7 +119,7 @@ def get_mixing_zones(history_paths, kipp_args, xlims = None):
     mix_data = []
     histories = []
     for history_name in history_paths:
-        history = Mesa_Data(history_name, read_data = False)
+        history = mesa_data(history_name, read_data = False)
         columns = []
         for key in history.columns.keys():
             search_regex = "log_R|star_mass|model_number|star_age|.*core_mass|mix_type.*|"
@@ -267,7 +267,7 @@ def get_xyz_data(profile_paths, kipp_args, xlims = None):
     prof_include = [False]*len(profile_paths)
     for i,profile_name in enumerate(profile_paths):
         try:
-            prof = Mesa_Data(profile_name, only_read_header = True)
+            prof = mesa_data(profile_name, only_read_header = True)
             if not kipp_args.yaxis_normalize:
                 if kipp_args.yaxis == "mass":
                     max_y = max(prof.header['star_mass'],max_y)
@@ -313,7 +313,7 @@ def get_xyz_data(profile_paths, kipp_args, xlims = None):
         Y_data_array[j,:] = max_y * j / (kipp_args.yresolution-1)
     for i,profile_name in enumerate(profile_paths):
         try:
-            prof = Mesa_Data(profile_name, read_data = False)
+            prof = mesa_data(profile_name, read_data = False)
             prof.read_data(columns)
         except Exception as e:
             print("Couldn't read profile " + profile_name, e)
