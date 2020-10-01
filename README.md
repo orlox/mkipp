@@ -143,7 +143,7 @@ plt.savefig("Kippenhahn3.png")
 which results in the following plot
 ![kipp](Kippenhahn3.png)
 
-It is also possible to apply a function to the xaxis. This can be used to generate a log(tf-t) plot. Here we also make use of the Mesa_Data class to read out the maximum age first.
+It is also possible to apply a function to the xaxis. This can be used to generate a log(tf-t) plot. Here we also make use of the mesa_data class to read out the maximum age first.
 ```python
 import mkipp
 import matplotlib.pyplot as plt
@@ -153,7 +153,7 @@ import mesa_data
 fig = plt.figure()
 axis = plt.gca()
 #only need to read star_age column first
-history = mesa_data.Mesa_Data("LOGS/history.data", read_data_cols = ["star_age"])
+history = mesa_data.mesa_data("LOGS/history.data", read_data_cols = ["star_age"])
 max_age = max(history.get("star_age"))
 kipp_plot = mkipp.kipp_plot(mkipp.Kipp_Args(
         xaxis = "star_age",
