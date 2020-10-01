@@ -25,7 +25,7 @@ class mesa_data:
             i = 0
             for i, header_name in enumerate(header_names):
                 #need to properly account for these new columns
-                if header_name in ["compiler", "build", "MESA_SDK_version", "date"]:
+                if header_name in ["version_number", "compiler", "build", "MESA_SDK_version", "date", "math_backend"]:
                     continue
                 self.header[header_name] = float(header_vals[i])
                 self.header_num[header_name] = i
