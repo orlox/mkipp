@@ -24,7 +24,7 @@ results in the following plot
 Here is an example that changes the default filename and the x limits. When x limits are specified the plotter optimizes which profile data it reads. To save a pdf just change the filename extension.
 ```python
 import mkipp
-mkipp.kipp_plot(mkipp.Kipp_Args(save_filename = "Kippenhahn2.png"), xlims = [300,600])
+mkipp.kipp_plot(mkipp.Kipp_Args(save_filename = "Kippenhahn2.png", xlims = [300,600]))
 ```
 which results in the following plot
 ![kipp](Kippenhahn2.png)
@@ -263,3 +263,49 @@ plt.savefig("Kippenhahn6.png")
 ```
 which gives the following ugly result (just an example!)
 ![kipp](Kippenhahn6.png)
+
+Another nice thing to do is to make different subpanels containing different
+evolutionary stages. This can be achieved by creating a single kipp\_args object
+and calling kipp\_plot on various subaxes
+
+```python
+import mkipp
+import kipp_data
+import mesa_data
+import matplotlib.pyplot as plt
+
+fig = plt.figure()
+spec = fig.add_gridspec(ncols=4, nrows=1, wspace=0.2, width_ratios = [5,5,5,1])
+ax1 = fig.add_subplot(spec[0, 0])
+ax2 = fig.add_subplot(spec[0, 1])
+ax3 = fig.add_subplot(spec[0, 2])
+ax4 = fig.add_subplot(spec[0, 3])
+
+kipp_args = mkipp.Kipp_Args(save_file = False, xaxis="star_age", decorate_plot = False)
+mkipp.kipp_plot(kipp_args, axis=ax1)
+mkipp.kipp_plot(kipp_args, axis=ax2)
+kipp_plot = mkipp.kipp_plot(kipp_args, axis=ax3)
+bar = fig.colorbar(kipp_plot.contour_plot, cax=ax4)
+#bar.ax.set_yticklabels(['0', '','2','','4','','6','','8',''])
+bar.set_label("$\\log_{10}|\\epsilon_{\\rm nuc}|$")
+
+history = mesa_data.mesa_data("LOGS/history.data", read_data_cols = ["star_age", "center_h1", "center_he4"])
+for i, center_h1 in enumerate(history.get("center_h1")):
+    if center_h1 < 1e-3:
+        age_tams = history.get("star_age")[i]/1e6
+        break
+for i, center_he4 in enumerate(history.get("center_he4")):
+    if center_he4 < 1e-3:
+        age_hedep = history.get("star_age")[i]/1e6
+        break
+ax1.set_xlim([0,age_tams])
+ax2.set_xlim([age_tams,age_hedep])
+ax3.set_xlim([age_hedep,history.get("star_age")[-1]/1e6])
+ax2.set_xlabel("star age (Myr)")
+ax1.set_ylabel("Mass (solar masses)")
+ax2.yaxis.set_ticklabels([])
+ax3.yaxis.set_ticklabels([])
+plt.savefig("Kippenhahn7.png")
+```
+which produces the following
+![kipp](Kippenhahn7.png)
