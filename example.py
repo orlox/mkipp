@@ -10,7 +10,7 @@ import numpy as np
 mkipp.kipp_plot(mkipp.Kipp_Args())
 
 #specify xrange and filename
-mkipp.kipp_plot(mkipp.Kipp_Args(save_filename = "Kippenhahn2.png"), xlims = [300,600])
+mkipp.kipp_plot(mkipp.Kipp_Args(save_filename = "Kippenhahn2.png", xlims = [300,600]))
 
 #plot of Helium abundance against time, independent decoration
 fig = plt.figure()

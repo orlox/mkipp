@@ -77,7 +77,8 @@ class Kipp_Args:
             decorate_plot = True,
             show_plot = False,
             save_file = True,
-            save_filename = "Kippenhahn.png"):
+            save_filename = "Kippenhahn.png",
+            xlims = None):
         """Initializes properties for a Kippenhahn plot
 
         Note:
@@ -124,12 +125,11 @@ class Kipp_Args:
             show_plot (bool): If True, pyplot.show() is ran at the end
             save_file (bool): If True, plot is saved after pyplot.show()
             save_filename (str): Filename to save plot. Extension determines filetype.
+            xlims (Tuple(float)): range in x to which the loaded data is restricted. By default all data is loaded
 
         """
 
         self.logs_dirs = logs_dirs
-        self.profile_paths = profile_paths
-        self.history_paths = history_paths
         self.clean_data = clean_data
         self.extra_history_cols = extra_history_cols
         self.identifier = identifier
@@ -158,11 +158,26 @@ class Kipp_Args:
         self.show_plot = show_plot
         self.save_file = save_file
         self.save_filename = save_filename
+        self.xlims = xlims
+        
+        #Fill profile and history names if unspecified
+        self.profile_paths = profile_paths
+        if len(self.profile_paths) == 0:
+            self.profile_paths = get_profile_paths(logs_dirs = self.logs_dirs)
+
+        self.history_paths = history_paths
+        if len(self.history_paths) == 0:
+            self.history_paths = []
+            for log_dir in self.logs_dirs:
+                self.history_paths.append(log_dir+"/history.data")
+
+        self.xyz_data = get_xyz_data(self.profile_paths, self, xlims = xlims)
+        self.mixing_zones = get_mixing_zones(self.history_paths, self, xlims = xlims)
                 
 
 #kipp_plot: Plots a Kippenhahn diagram into the matplotlib axis given. No decoration
 #           done (i.e. axis labeling or colorbars). Returns
-def kipp_plot(kipp_args, axis=None, xlims = None):
+def kipp_plot(kipp_args, axis=None):
     xaxis_divide = kipp_args.xaxis_divide
     if kipp_args.xaxis == "star_age":
         if kipp_args.time_units == "1000 yr":
@@ -176,17 +191,7 @@ def kipp_plot(kipp_args, axis=None, xlims = None):
         fig = plt.figure()
         axis = fig.gca()
 
-    #Fill profile and history names if unspecified
-    profile_paths = kipp_args.profile_paths
-    if len(profile_paths) == 0:
-        profile_paths = get_profile_paths(logs_dirs = kipp_args.logs_dirs)
-    history_paths = kipp_args.history_paths
-    if len(history_paths) == 0:
-        history_paths = []
-        for log_dir in kipp_args.logs_dirs:
-            history_paths.append(log_dir+"/history.data")
-
-    xyz_data = get_xyz_data(profile_paths, kipp_args, xlims = xlims)
+    xyz_data = kipp_args.xyz_data
 
     #only plot if there is data
     if xyz_data.Z.size > 0:
@@ -207,9 +212,7 @@ def kipp_plot(kipp_args, axis=None, xlims = None):
         contour_plot = axis.contourf([[None,None]], [[None,None]], [[None,None]], \
                     cmap=kipp_args.contour_colormap, antialiased = False)
 
-
-    mixing_zones = get_mixing_zones(history_paths, kipp_args, xlims = xyz_data.xlims)
-
+    mixing_zones = kipp_args.mixing_zones
 
     for i,zone in enumerate(mixing_zones.zones):
         color = ""
@@ -289,8 +292,8 @@ def kipp_plot(kipp_args, axis=None, xlims = None):
             else:   
                 axis.set_ylabel(r'$m/M_\odot$')
 
-    if xlims != None:
-        axis.set_xlim(xlims)
+    if kipp_args.xlims != None:
+        axis.set_xlim(kipp_args.xlims)
 
     if kipp_args.show_plot:
         plt.show()
